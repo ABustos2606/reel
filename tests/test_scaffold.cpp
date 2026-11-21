@@ -377,9 +377,11 @@ void test_lfo(const LV2_Descriptor* d)
         in.signal(LfoPort::rate_cv, i) = static_cast<float>(std::sin(frame * 0.001));
     });
     for (uint32_t c = 0; c < 4; ++c) {
-        for (float x : o[index(nth(LfoPort::out_1, c))]) { require(x == 0.0f, "Reel LFO outputs 0 until milestone 2"); }
+        for (float x : o[index(nth(LfoPort::out_1, c))]) {
+            require(std::isfinite(x) && x > 0.0f && x <= 1.0f, "Reel LFO outputs from 1/4096 to 1");
+        }
     }
-    std::cout << "PASS lfo: Reel LFO loads and runs; outputs 0 (milestone 2 drives them)\n";
+    std::cout << "PASS lfo: Reel LFO loads and runs; outputs within 0 to 1 (test_lfo checks them)\n";
 }
 
 void test_allocation(const LV2_Descriptor* d, const LV2_Descriptor* lfo_d)
@@ -389,6 +391,7 @@ void test_allocation(const LV2_Descriptor* d, const LV2_Descriptor* lfo_d)
     // save and restore called from another thread meanwhile.
     Instance instance(d, 48000, 128);
     Instance lfo(lfo_d, 48000, 128);
+    instance.record_lists = false;
     test::State state;
     instance.save(state);
     std::atomic<bool> done{false};

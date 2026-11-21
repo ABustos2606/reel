@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<!-- SPDX-License-Identifier: MIT -->
+<!-- Copyright (c) 2026 Alejandro Bustos -->
+<!--
+  Mockup of Peepo's Reel page (docs/peepo-page.md), 800 x 480, for approval
+  before Peepo builds it. Not shipped. The state is the URL's hash:
+  #on-keyframe, #between, #curves, #sequencer, #clear. Rendered to
+  docs/images/mockup-reel-*.png by tools/mockup/render.sh.
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  @font-face { font-family: "Montserrat"; src: local("Montserrat"), url("file:///C:/Pedal%20PI/build/_deps/lvgl-src/scripts/built_in_font/Montserrat-Medium.ttf"); }
+  html, body { margin: 0; padding: 0; background: #000; }
+  #screen { position: relative; width: 800px; height: 480px; overflow: hidden; background: #000; color: #fff;
+            font-family: "Montserrat", "Segoe UI", sans-serif; }
+  .mono { font-family: "JetBrains Mono", Consolas, monospace; }
+  .abs { position: absolute; }
+  .dot { left: 24px; top: 16px; width: 8px; height: 8px; border-radius: 4px; background: #4ade80; }
+  .crumb { left: 40px; top: 11px; font-size: 13px; letter-spacing: 2px; color: #a3a3a3; }
+  .title { left: 24px; top: 30px; font-size: 24px; font-weight: 700; letter-spacing: 0.5px; }
+  .pills { right: 24px; top: 16px; display: flex; gap: 8px; }
+  .pill { height: 38px; padding: 0 18px; border-radius: 20px; border: 1px solid #4a4a4a; background: #111;
+          font-size: 14px; font-weight: 700; letter-spacing: 1px; display: flex; align-items: center; }
+  .pill.main { background: #fff; color: #000; border-color: #fff; }
+  .pill.on { background: #6b6a24; border-color: #6b6a24; }
+  .pill.dim { color: #555; border-color: #2a2a2a; }
+  .heading { font-size: 12px; letter-spacing: 2px; color: #e8d44d; }
+  .note { font-size: 12px; color: #8a8a8a; }
+  .bar { width: 298px; height: 38px; border: 1px solid #2e2e2e; border-radius: 6px; background: #111; overflow: hidden; }
+  .bar .fill { position: absolute; left: 0; top: 0; bottom: 0; background: #6b6a24; }
+  .bar .name { position: absolute; left: 12px; top: 12px; font-size: 13px; font-weight: 700; letter-spacing: 1px; }
+  .bar .value { position: absolute; right: 10px; top: 9px; font-size: 18px; font-weight: 700; }
+  .bar.focus { border: 2px solid #fff; width: 296px; height: 36px; }
+  .bar.dimmed .name, .bar.dimmed .value { color: #666; }
+  .bar.dimmed .fill { background: #3a3a1a; }
+  .choice { display: flex; }
+  .choice div { flex: 1; text-align: center; font-size: 13px; font-weight: 700; letter-spacing: 1px; line-height: 38px; color: #777; }
+  .choice div.sel { background: #6b6a24; color: #fff; }
+  .footer-line { left: 0; right: 0; top: 432px; height: 1px; background: #222; }
+  .back { left: 14px; top: 439px; width: 110px; height: 34px; border: 1px solid #4a4a4a; border-radius: 6px;
+          font-size: 14px; font-weight: 700; letter-spacing: 1px; display: flex; align-items: center; justify-content: center; }
+  .msg { left: 142px; top: 441px; font-size: 13px; color: #a3a3a3; width: 410px; white-space: nowrap; overflow: hidden; }
+  .bpm { left: 560px; top: 436px; width: 50px; text-align: right; font-size: 18px; font-weight: 700; color: #4ade80; }
+  .cpu { left: 622px; top: 436px; width: 70px; text-align: right; font-size: 18px; font-weight: 700; }
+  .small { font-size: 12px; color: #8a8a8a; letter-spacing: 1px; }
+  .rail { left: 8px; width: 40px; height: 40px; border-radius: 20px; border: 1px solid #333; background: #111;
+          font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; color: #aaa; }
+  .rail.sel { background: #6b6a24; border-color: #6b6a24; color: #fff; }
+</style>
+</head>
+<body>
+<div id="screen"></div>
+<script>
+// Keyframes: position, id (colour: keyframer.cc palette_, id mod 8), levels 1-4.
+const PALETTE = ["rgb(255,0,0)", "rgb(255,64,0)", "rgb(255,255,0)", "rgb(64,255,0)",
+                 "rgb(0,255,64)", "rgb(0,0,255)", "rgb(255,0,255)", "rgb(255,0,64)"];
+const KEYFRAMES = [
+  {p: 0.08, id: 0, l: [1.00, 0.00, 0.80, 0.20]},
+  {p: 0.30, id: 1, l: [0.70, 0.40, 0.10, 0.90]},
+  {p: 0.50, id: 3, l: [0.80, 0.25, 0.60, 0.50]},
+  {p: 0.72, id: 2, l: [0.20, 0.90, 0.60, 0.00]},
+  {p: 0.93, id: 4, l: [0.00, 1.00, 0.30, 0.70]},
+];
+const EASING_NAMES = ["STEP", "LINEAR", "IN QUARTIC", "OUT QUARTIC", "SINE", "BOUNCE"];
+const EASING = [1, 4, 0, 3];      // per channel
+const RESPONSE = [0.00, 0.00, 0.35, 1.00];
+function ease(curve, t) {
+  switch (curve) {
+    case 0: return t < 0.5 ? 0 : 1;
+    case 1: return t;
+    case 2: return t * t * t * t;
+    case 3: return 1 - Math.pow(1 - t, 4);
+    case 4: return (1 - Math.cos(Math.PI * t)) / 2;
+    case 5: { // out bounce
+      const n = 7.5625, d = 2.75;
+      if (t < 1 / d) return n * t * t;
+      if (t < 2 / d) { t -= 1.5 / d; return n * t * t + 0.75; }
+      if (t < 2.5 / d) { t -= 2.25 / d; return n * t * t + 0.9375; }
+      t -= 2.625 / d; return n * t * t + 0.984375;
+    }
+  }
+}
+function level(ch, x) {
+  const k = KEYFRAMES;
+  if (x <= k[0].p) return k[0].l[ch];
+  if (x >= k[k.length - 1].p) return k[k.length - 1].l[ch];
+  let i = 1; while (k[i].p < x) ++i;
+  const t = (x - k[i - 1].p) / (k[i].p - k[i - 1].p);
+  return k[i - 1].l[ch] + (k[i].l[ch] - k[i - 1].l[ch]) * ease(EASING[ch], t);
+}
+
+const S = document.getElementById("screen");
+function el(cls, style, html) {
+  const d = document.createElement("div");
+  d.className = "abs " + cls; Object.assign(d.style, style || {}); d.innerHTML = html || ""; S.appendChild(d); return d;
+}
+function px(n) { return n + "px"; }
+function header(pills) {
+  el("dot"); el("crumb mono", {}, "PEEPO // MODULE"); el("title", {}, "REEL");
+  const p = el("pills");
+  for (const [label, cls] of pills) { const d = document.createElement("div"); d.className = "pill " + (cls || ""); d.textContent = label; p.appendChild(d); }
+}
+function footer(message) {
+  el("footer-line"); el("back", {}, "&lt; BACK");
+  el("msg mono", {}, message);
+  el("bpm", {}, "120"); el("small", {left: "580px", top: "459px"}, "BPM");
+  el("cpu", {}, "12%"); el("small", {left: "644px", top: "459px"}, "CPU");
+  el("", {left: "706px", top: "439px", width: "72px", height: "7px", background: "#222", borderRadius: "2px"});
+  el("", {left: "706px", top: "439px", width: "52px", height: "7px", background: "#4ade80", borderRadius: "2px"});
+  el("", {left: "706px", top: "450px", width: "72px", height: "7px", background: "#222", borderRadius: "2px"});
+  el("", {left: "706px", top: "450px", width: "47px", height: "7px", background: "#4ade80", borderRadius: "2px"});
+  el("small", {left: "728px", top: "459px"}, "IN/OUT");
+}
+
+// The lanes: the Frame axis left to right, one lane per channel with its
+// level along Frame (each channel's easing), keyframes as marks in their
+// colour, the active one outlined in white, Frame as the green cursor.
+const LX = 64, LW = 640, LT = 96, LH = 28, LG = 6;
+function lanes(frame, active, opts) {
+  opts = opts || {};
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("width", 800); svg.setAttribute("height", 240);
+  svg.style.position = "absolute"; svg.style.left = "0"; svg.style.top = "70px";
+  S.appendChild(svg);
+  const add = (tag, attrs) => { const e = document.createElementNS(ns, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); svg.appendChild(e); return e; };
+  const X = (x) => LX + x * LW;
+  const top = LT - 70;
+  for (let ch = 0; ch < 4; ++ch) {
+    const y0 = top + ch * (LH + LG);
+    add("rect", {x: LX, y: y0, width: LW, height: LH, rx: 5, fill: "#0f0f0f", stroke: "#262626"});
+    let d = "", fillD = `M ${X(0)} ${y0 + LH}`;
+    for (let i = 0; i <= 640; ++i) {
+      const x = i / 640, v = level(ch, x), y = y0 + LH - 3 - v * (LH - 6);
+      d += (i ? " L " : "M ") + X(x).toFixed(1) + " " + y.toFixed(1);
+      fillD += ` L ${X(x).toFixed(1)} ${y.toFixed(1)}`;
+    }
+    fillD += ` L ${X(1)} ${y0 + LH} Z`;
+    add("path", {d: fillD, fill: "rgba(232,212,77,0.16)"});
+    add("path", {d, fill: "none", stroke: "#e8d44d", "stroke-width": 1.6});
+    const label = add("text", {x: 44, y: y0 + 19, fill: "#8a8a8a", "font-size": 13, "font-weight": 700, "font-family": "Montserrat, sans-serif"});
+    label.textContent = String(ch + 1);
+    const now = add("text", {x: 714, y: y0 + 19, fill: "#e8d44d", "font-size": 13, "font-family": "Consolas, monospace"});
+    now.textContent = level(ch, frame).toFixed(2);
+  }
+  const bottom = top + 4 * LH + 3 * LG;
+  // Keyframe marks with their number tags.
+  KEYFRAMES.forEach((k, i) => {
+    const colour = PALETTE[k.id % 8];
+    add("line", {x1: X(k.p), x2: X(k.p), y1: top, y2: bottom, stroke: colour, "stroke-width": 2, opacity: 0.9});
+    for (let ch = 0; ch < 4; ++ch) {
+      const y0 = top + ch * (LH + LG);
+      add("circle", {cx: X(k.p), cy: y0 + LH - 3 - k.l[ch] * (LH - 6), r: 3.2, fill: colour});
+    }
+    const isActive = i === active;
+    add("rect", {x: X(k.p) - 11, y: top - 22, width: 22, height: 17, rx: 4,
+                 fill: isActive ? "#fff" : "#111", stroke: isActive ? "#fff" : colour, "stroke-width": 1.5});
+    const t = add("text", {x: X(k.p), y: top - 9, "text-anchor": "middle", "font-size": 11, "font-weight": 700,
+                           fill: isActive ? "#000" : "#fff", "font-family": "Montserrat, sans-serif"});
+    t.textContent = String(i + 1);
+    if (isActive) add("rect", {x: X(k.p) - 5, y: top - 2, width: 10, height: bottom - top + 4, rx: 3, fill: "none", stroke: "#fff", "stroke-width": 1.5});
+  });
+  // The 1/32 zone around Frame in which a keyframe becomes the editing target.
+  if (!opts.sequencer) add("rect", {x: X(frame - 1 / 32), y: bottom + 3, width: LW / 16, height: 3, fill: "#2f6b45"});
+  // Frame: the cursor (the effective Frame) and its handle.
+  const fx = X(frame);
+  add("line", {x1: fx, x2: fx, y1: top - 4, y2: bottom + 2, stroke: opts.sequencer ? "#fff" : "#4ade80", "stroke-width": 2});
+  add("path", {d: `M ${fx - 7} ${bottom + 14} L ${fx + 7} ${bottom + 14} L ${fx} ${bottom + 4} Z`, fill: opts.sequencer ? "#fff" : "#4ade80"});
+  const axis = (x, s) => { const e = add("text", {x: X(x), y: bottom + 16, "text-anchor": "middle", "font-size": 11, fill: "#666", "font-family": "Consolas, monospace"}); e.textContent = s; };
+  axis(0, "0"); axis(1, "1");
+  return bottom + 70;
+}
+
+// The list under the lanes: compact bars, two to a row.
+function bar(x, y, name, value, fill, cls) {
+  const b = el("bar " + (cls || ""), {left: px(x), top: px(y)});
+  if (fill !== null && fill !== undefined) { const f = document.createElement("div"); f.className = "fill"; f.style.width = (fill * 100) + "%"; b.appendChild(f); }
+  const n = document.createElement("div"); n.className = "name"; n.textContent = name; b.appendChild(n);
+  const v = document.createElement("div"); v.className = "value"; v.textContent = value; b.appendChild(v);
+  return b;
+}
+function choice(x, y, options, selected) {
+  const b = el("bar choice", {left: px(x), top: px(y)});
+  options.forEach((o, i) => { const d = document.createElement("div"); d.textContent = o; if (i === selected) d.className = "sel"; b.appendChild(d); });
+}
+function heading(y, text, note) {
+  el("heading mono", {left: "64px", top: px(y)}, text);
+  if (note) el("note", {left: "404px", top: px(y)}, note);
+}
+function rail(y0, selected) {
+  ["KF", "CRV", "MODE"].forEach((label, i) => el("rail " + (i === selected ? "sel" : ""), {top: px(y0 + i * 48)}, label));
+}
+
+const state = (location.hash || "#on-keyframe").slice(1);
+const ROW = 50, LIST = 262;
+if (state === "on-keyframe" || state === "between") {
+  const on = state === "on-keyframe";
+  const frame = on ? 0.50 : 0.40;
+  header([["ADD", on ? "dim" : "main"], ["DELETE", on ? "" : "dim"], ["CLEAR ALL"], ["ON", "on"], ["ACTIONS"]]);
+  lanes(frame, on ? 2 : -1);
+  rail(LIST, 0);
+  bar(64, LIST, "FRAME", frame.toFixed(2), frame, "focus");
+  bar(404, LIST, "FRAME CV AMT", "1.00", 1.0);
+  if (on) {
+    heading(LIST + 50, "KEYFRAME 3 OF 5", "Levels edit this keyframe.");
+    const l = KEYFRAMES[2].l;
+    bar(64, LIST + 70, "LEVEL 1", l[0].toFixed(2), l[0]); bar(404, LIST + 70, "LEVEL 2", l[1].toFixed(2), l[1]);
+    bar(64, LIST + 120, "LEVEL 3", l[2].toFixed(2), l[2]); bar(404, LIST + 120, "LEVEL 4", l[3].toFixed(2), l[3]);
+    footer("FRAME 0.50 // KEYFRAME 3 OF 5");
+  } else {
+    heading(LIST + 50, "NO KEYFRAME AT 0.40", "Add stores these levels here.");
+    const l = [0.50, 0.50, 1.00, 0.30];
+    bar(64, LIST + 70, "LEVEL 1", l[0].toFixed(2), l[0]); bar(404, LIST + 70, "LEVEL 2", l[1].toFixed(2), l[1]);
+    bar(64, LIST + 120, "LEVEL 3", l[2].toFixed(2), l[2]); bar(404, LIST + 120, "LEVEL 4", l[3].toFixed(2), l[3]);
+    footer("FRAME 0.40 // BETWEEN 2 AND 3");
+  }
+} else if (state === "curves") {
+  header([["ADD", "dim"], ["DELETE"], ["CLEAR ALL"], ["ON", "on"], ["ACTIONS"]]);
+  lanes(0.50, 2);
+  rail(LIST, 1);
+  heading(LIST - 2, "CURVES", "Easing between keyframes; VCA response.");
+  for (let ch = 0; ch < 4; ++ch) {
+    const x = ch % 2 ? 404 : 64, y = LIST + 18 + Math.floor(ch / 2) * ROW;
+    bar(x, y, "EASING " + (ch + 1), EASING_NAMES[EASING[ch]], null, ch === 0 ? "focus" : "");
+  }
+  for (let ch = 0; ch < 2; ++ch) {
+    const x = ch % 2 ? 404 : 64, y = LIST + 18 + 2 * ROW;
+    bar(x, y, "RESPONSE " + (ch + 1), RESPONSE[ch] === 0 ? "LINEAR" : RESPONSE[ch].toFixed(2), RESPONSE[ch]);
+  }
+  footer("E1 picks a bar, E2 turns it.");
+} else if (state === "sequencer") {
+  header([["ADD", "dim"], ["DELETE"], ["CLEAR ALL"], ["ON", "on"], ["ACTIONS"]]);
+  lanes(0.30, 2, {sequencer: true});
+  rail(LIST, 2);
+  heading(LIST - 2, "MODE", "Frame CV steps through the keyframes.");
+  choice(64, LIST + 18, ["KEYFRAMES", "SEQUENCER"], 1);
+  bar(404, LIST + 18, "OUTPUT", "0.0 dB", 24 / 36);
+  heading(LIST + 68, "STEP 2 OF 5", "Frame still picks the keyframe to edit.");
+  bar(64, LIST + 88, "RESPONSE 3", "0.35", 0.35); bar(404, LIST + 88, "RESPONSE 4", "EXP", 1.0);
+  footer("SEQUENCER // STEP 2 OF 5 // EDITING 3");
+} else if (state === "clear") {
+  header([["CLEAR 5 KEYFRAMES", "main"], ["CANCEL"]]);
+  lanes(0.50, 2);
+  rail(LIST, 0);
+  bar(64, LIST, "FRAME", "0.50", 0.5, "dimmed");
+  bar(404, LIST, "FRAME CV AMT", "1.00", 1.0, "dimmed");
+  heading(LIST + 50, "KEYFRAME 3 OF 5");
+  const l = KEYFRAMES[2].l;
+  bar(64, LIST + 70, "LEVEL 1", l[0].toFixed(2), l[0], "dimmed"); bar(404, LIST + 70, "LEVEL 2", l[1].toFixed(2), l[1], "dimmed");
+  bar(64, LIST + 120, "LEVEL 3", l[2].toFixed(2), l[2], "dimmed"); bar(404, LIST + 120, "LEVEL 4", l[3].toFixed(2), l[3], "dimmed");
+  footer("Clear every keyframe? The levels then follow the bars.");
+}
+</script>
+</body>
+</html>

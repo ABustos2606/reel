@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Alejandro Bustos
 //
-// Milestone 1: keyframes (implementation plan, 6.1): editing, easing, vca,
-// trigger, state, slicing, bypass, instances, allocation and rt_timing
+// Milestones 1 and 2 (implementation plan, 6.1): editing, easing, vca,
+// trigger, sequencer, telemetry, state, slicing, bypass, instances,
+// allocation and rt_timing
 // (--timing). The plugin is compared with the vendored Keyframer driven
 // directly.
 #include "host.hpp"
@@ -533,6 +534,184 @@ void test_trigger(const LV2_Descriptor* d)
                  "keyframe; none bypassed or with no keyframes\n";
 }
 
+void build(Instance& in);
+
+// --- sequencer -------------------------------------------------------------
+
+// Frame CV held at `cv` for `seconds`; the pulses on the trigger, and the
+// Level outs at the end.
+struct Held {
+    Pulses pulses;
+    Levels levels;
+};
+
+Held hold(Instance& in, float cv, double seconds = 0.05)
+{
+    const auto o = in.render(static_cast<uint64_t>(seconds * kRate),
+                             [cv](Instance& x, uint32_t i, uint64_t) { x.signal(Port::frame_cv, i) = cv; });
+    Held held{pulses(o[index(Port::trigger)], static_cast<uint32_t>(std::lround(0.01 * kRate))), {}};
+    for (uint32_t c = 0; c < 4; ++c) { held.levels[c] = o[index(nth(Port::level_1, c))].back(); }
+    return held;
+}
+
+void test_sequencer(const LV2_Descriptor* d)
+{
+    const std::array<std::pair<float, Levels>, 3> keyframes{{{0.2f, {0.9f, 0.1f, 0.5f, 0.3f}},
+                                                             {0.5f, {0.2f, 0.8f, 0.4f, 0.6f}},
+                                                             {0.8f, {0.6f, 0.3f, 0.7f, 0.0f}}}};
+    Instance in(d, kRate);
+    for (const auto& [position, levels] : keyframes) { add_keyframe(in, position, levels); }
+    // Frame between keyframes (none active, so nothing is edited) and Frame
+    // CV amount odd: the sequencer ignores both.
+    in.control(Port::frame) = 0.65f;
+    in.control(Port::frame_cv_amount) = -0.3f;
+    in.control(Port::mode) = 1;
+    const auto at = [&](const Held& held, int step, const char* what) {
+        require(telemetry(in, Port::t_step) == step,
+                std::string(what) + ": step " + std::to_string(telemetry(in, Port::t_step)));
+        require(in.control(Port::t_frame) == code(keyframes[step].first) / 65535.0f, std::string(what) + ": t_frame");
+        for (uint32_t c = 0; c < 4; ++c) {
+            require(held.levels[c] == linear_gain(code(keyframes[step].second[c])),
+                    std::string(what) + ": the keyframe's levels, exactly");
+        }
+    };
+    at(hold(in, 0.0f), 0, "Sequencer on, Frame CV low");
+    // Each rise above 2/3 after a fall below 1/3 steps once, with one pulse.
+    Held h = hold(in, 1.0f);
+    at(h, 1, "first rise");
+    require(h.pulses.count == 1 && h.pulses.lengths_ok, "a step fires the trigger");
+    // Not below 1/3 in between: no step.
+    h = hold(in, 0.5f);
+    require(h.pulses.count == 0, "a fall to 1/2 doesn't step");
+    h = hold(in, 0.9f);
+    at(h, 1, "a rise without a fall below 1/3");
+    require(h.pulses.count == 0, "and fires nothing");
+    hold(in, 0.3f);
+    at(hold(in, 0.7f), 2, "1/3 and 2/3 are the thresholds");
+    hold(in, -1.0f);
+    h = hold(in, 1.0f);
+    at(h, 0, "the step wraps after the last keyframe");
+    require(h.pulses.count == 1, "the wrap fires the trigger");
+    hold(in, 0.0f);
+    hold(in, 1.0f);
+    // Mode off: Frame and Frame CV again; the step is kept.
+    in.control(Port::mode) = 0;
+    hold(in, 0.0f, 0.2);
+    require(telemetry(in, Port::t_step) == 1 && std::abs(in.control(Port::t_frame) - 0.65f) < 1e-4f,
+            "Keyframes mode: Frame again, the step kept");
+    hold(in, 1.0f);
+    in.control(Port::mode) = 1;
+    at(hold(in, 1.0f), 1, "Sequencer again resumes at the kept step");
+    // No keyframes: the levels follow the Level controls (immediate).
+    press(in, Port::clear_all);
+    in.control(Port::ch_1) = 0.3f;
+    h = hold(in, 0.0f);
+    h = hold(in, 1.0f);
+    require(telemetry(in, Port::t_step) == 0 && h.levels[0] == linear_gain(code(0.3f)),
+            "no keyframes: the Level controls");
+    std::cout << "PASS sequencer: each Frame CV rise above 2/3 after a fall below 1/3 steps once, with a pulse, and "
+                 "wraps; Frame and Frame CV amount ignored; levels exact; the step kept across modes; no keyframes "
+                 "follow the Level controls\n";
+}
+
+// --- telemetry -------------------------------------------------------------
+
+// t_keyframes' text (src/telemetry.hpp) as a list.
+KeyframeList decode(const std::string& text)
+{
+    require(text.rfind("1:", 0) == 0 && (text.size() - 2) % 24 == 0, "list format: " + text.substr(0, 40));
+    KeyframeList list;
+    list.count = static_cast<uint32_t>((text.size() - 2) / 24);
+    require(list.count <= 64, "at most 64");
+    for (uint32_t k = 0; k < list.count; ++k) {
+        uint16_t words[6];
+        for (uint32_t w = 0; w < 6; ++w) {
+            const std::string digits = text.substr(2 + k * 24 + w * 4, 4);
+            require(digits.find_first_not_of("0123456789abcdef") == std::string::npos, "lowercase hex");
+            words[w] = static_cast<uint16_t>(std::stoul(digits, nullptr, 16));
+        }
+        list.keyframes[k] = {words[0], words[1], {words[2], words[3], words[4], words[5]}};
+    }
+    return list;
+}
+
+void test_telemetry(const LV2_Descriptor* d)
+{
+    // The empty list at the first run().
+    Instance in(d, kRate);
+    in.render(in.block);
+    require(in.lists.size() == 1 && in.lists[0].text == "1:", "the empty list at the first run()");
+
+    // A change goes out within 40 ms (plus the period that sees it).
+    build(in);
+    in.lists.clear();
+    in.control(Port::frame) = 0.3f;
+    in.render(in.block);
+    add_keyframe(in, 0.3f, {0.1f, 0.2f, 0.3f, 0.4f});
+    const uint64_t added = in.frame;
+    in.render(static_cast<uint64_t>(0.1 * kRate));
+    const auto fresh = std::find_if(in.lists.begin(), in.lists.end(),
+                                    [](const auto& l) { return decode(l.text).count == 4; });
+    require(fresh != in.lists.end() && fresh->frame <= added + 0.04 * kRate, "a change goes out within 40 ms");
+    require(same(decode(in.lists.back().text), saved_list(in)), "the list is the saved one: positions, ids, levels");
+
+    // Unchanged: again every 0.5 s.
+    in.lists.clear();
+    in.render(static_cast<uint64_t>(3 * kRate));
+    require(in.lists.size() >= 5 && in.lists.size() <= 7, "every 0.5 s: " + std::to_string(in.lists.size()));
+    for (size_t k = 1; k < in.lists.size(); ++k) {
+        const uint64_t gap = in.lists[k].frame - in.lists[k - 1].frame;
+        require(gap >= 0.5 * kRate - in.block && gap <= 0.5 * kRate + in.block, "0.5 s apart");
+    }
+
+    // A Level dragged on the active keyframe: at most 25 lists a second, the
+    // last one right.
+    in.lists.clear();
+    in.render(static_cast<uint64_t>(2 * kRate), [](Instance& x, uint32_t, uint64_t frame) {
+        x.control(Port::ch_2) = static_cast<float>(0.5 + 0.4 * std::sin(frame * 0.0003));
+    });
+    require(in.lists.size() >= 40 && in.lists.size() <= 51, "25 a second: " + std::to_string(in.lists.size()));
+    in.render(static_cast<uint64_t>(0.1 * kRate));
+    require(same(decode(in.lists.back().text), saved_list(in)), "the last list after a drag");
+
+    // jalv prepares the buffer before every run(), Ingen once per period
+    // (above, with random slices): neither loses a list.
+    Instance jalv(d, kRate);
+    jalv.atom_per_slice = true;
+    build(jalv);
+    jalv.render(static_cast<uint64_t>(0.1 * kRate));
+    require(same(decode(jalv.lists.back().text), saved_list(jalv)), "a buffer prepared per run()");
+
+    // 64 keyframes: 1538 characters.
+    KeyframeList sixty_four;
+    sixty_four.count = 64;
+    for (uint16_t k = 0; k < 64; ++k) {
+        sixty_four.keyframes[k] = {static_cast<uint16_t>(k * 1000 + 7), static_cast<uint16_t>(k * 3),
+                                   {static_cast<uint16_t>(k), 65535, 0, static_cast<uint16_t>(40000 + k)}};
+    }
+    Instance full(d, kRate);
+    test::State state;
+    full.save(state);
+    const reel::StateKeys keys = keys_of(full);
+    uint8_t buffer[reel::kVectorBytes];
+    const size_t size = reel::serialise_keyframes(keys, sixty_four, buffer);
+    state.values[keys.keyframes] = {std::vector<uint8_t>(buffer, buffer + size), keys.atom_vector,
+                                    LV2_STATE_IS_POD | LV2_STATE_IS_PORTABLE};
+    require(full.restore(state) == LV2_STATE_SUCCESS, "restore 64");
+    full.render(static_cast<uint64_t>(0.1 * kRate));
+    require(full.lists.back().text.size() == 2 + 64 * 24 && same(decode(full.lists.back().text), sixty_four),
+            "64 keyframes");
+
+    // Without urid:map nothing is written.
+    Instance bare(d, kRate, 128, false);
+    build(bare);
+    bare.render(static_cast<uint64_t>(kRate));
+    require(bare.lists.empty(), "no urid:map, no list");
+    std::cout << "PASS telemetry: t_keyframes sends the list (\"1:\", 24 hex digits a keyframe) at the first run(), "
+                 "within 40 ms of a change, at most 25 times a second, every 0.5 s unchanged; buffers prepared per "
+                 "period or per run(); 64 keyframes; nothing without urid:map\n";
+}
+
 // --- state -----------------------------------------------------------------
 
 void build(Instance& in)
@@ -742,7 +921,8 @@ void test_state(const LV2_Descriptor* d)
 void performance(Instance& in, uint32_t i, uint64_t frame)
 {
     inputs(in, i, frame);
-    in.signal(Port::frame_cv, i) = static_cast<float>(0.3 * std::sin(frame * 0.0007));
+    // Frame CV crosses both of the sequencer's thresholds.
+    in.signal(Port::frame_cv, i) = static_cast<float>(0.8 * std::sin(frame * 0.0007));
     constexpr uint64_t kChange = 128 * 37;
     if (i == 0 && frame % kChange == 0) {
         const uint64_t n = frame / kChange;
@@ -757,6 +937,7 @@ void performance(Instance& in, uint32_t i, uint64_t frame)
         in.control(Port::response_2) = static_cast<float>(n % 4) / 3;
         in.control(Port::output) = n % 3 ? -12.0f : 3.0f;
         in.control(Port::enabled) = n % 13 == 12 ? 0.0f : 1.0f;
+        in.control(Port::mode) = n % 11 >= 8 ? 1.0f : 0.0f;
     }
 }
 
@@ -884,6 +1065,7 @@ void test_allocation(const LV2_Descriptor* d)
     // run() on a thread that has never run Reel, with edits and presses, and
     // save and restore called from another thread meanwhile.
     Instance instance(d, kRate, 128);
+    instance.record_lists = false;
     build(instance);
     test::State state;
     instance.save(state);
@@ -955,6 +1137,7 @@ void test_timing(const LV2_Descriptor* d)
             in.control(Port::clear_all) = r > 0.995f;
             in.control(Port::enabled) = random() > 0.05f;
             in.control(Port::output) = 36 * random() - 24;
+            in.control(Port::mode) = random() > 0.8f ? 1.0f : 0.0f;
         }
     });
     done = true;
@@ -984,6 +1167,8 @@ int main(int argc, char** argv)
         test_easing(library.descriptor);
         test_vca(library.descriptor);
         test_trigger(library.descriptor);
+        test_sequencer(library.descriptor);
+        test_telemetry(library.descriptor);
         test_state(library.descriptor);
         test_slicing(library.descriptor);
         test_bypass(library.descriptor);

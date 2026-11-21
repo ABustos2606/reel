@@ -48,4 +48,15 @@ inline float vca_gain(double level, double balance)
     return static_cast<float>(std::pow(10.0, -1.5 * (v_linear + balance * (v_exponential - v_linear))));
 }
 
+// The gain of a 12-bit DAC code through the 2164, as the hardware's VCAs give
+// it: the code is a control voltage (4095 is 2.5 V; drivers/dac.h), at -30 dB
+// per volt. Reel LFO's outputs (plan, 4.5): PolyLfo's codes at linear
+// response, so (value + 32768) / 65535 to the DAC's precision (0.02 dB per
+// code), from 1/4096 (-72 dB) to 1.
+inline float dac_gain(uint16_t code)
+{
+    const double volts = code * 16.0 / 65535.0 * 2.5;
+    return static_cast<float>(std::pow(10.0, -30.0 * volts / 20.0));
+}
+
 } // namespace reel

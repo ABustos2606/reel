@@ -2,6 +2,9 @@
 // Copyright (c) 2026 Alejandro Bustos
 #include "host.hpp"
 
+#include <lv2/atom/atom.h>
+#include <lv2/atom/util.h>
+
 #include <chrono>
 #include <cstring>
 #include <dlfcn.h>
@@ -53,6 +56,10 @@ Instance::Instance(const LV2_Descriptor* d, double sample_rate, uint32_t size, b
     handle = d->instantiate(d, rate, ".", with_map ? with : without);
     require(handle, "instantiate at " + std::to_string(rate) + " Hz");
     for (auto& buffer : buffers_) { buffer.assign(size + 1, 0.0f); }
+    atom_.assign(kAtomBytes / sizeof(uint64_t), 0);
+    chunk_ = urids.map(LV2_ATOM__Chunk);
+    sequence_ = urids.map(LV2_ATOM__Sequence);
+    string_ = urids.map(LV2_ATOM__String);
     // The Turtle defaults that are not 0, one assignment per line: ttl_check
     // reads them.
     if (lfo) {
@@ -61,6 +68,8 @@ Instance::Instance(const LV2_Descriptor* d, double sample_rate, uint32_t size, b
         control(LfoPort::shape_spread) = 0.5f;
         control(LfoPort::spread) = 0.5f;
         control(LfoPort::coupling) = 0.5f;
+        control(LfoPort::bpm) = 120.0f;
+        control(LfoPort::note) = 3.0f;
         // lfo-defaults-end
     } else {
         // reel-defaults-begin
@@ -102,6 +111,10 @@ bool Instance::is_output(uint32_t p) const
 void Instance::connect(uint32_t offset)
 {
     for (uint32_t p = 0; p < port_count; ++p) {
+        if (!lfo && p == reel::index(Port::t_keyframes)) {
+            descriptor->connect_port(handle, p, atom_.data());
+            continue;
+        }
         descriptor->connect_port(handle, p, is_signal(p) ? buffers_[p].data() + offset : &controls_[p]);
     }
 }
@@ -109,22 +122,52 @@ void Instance::connect(uint32_t offset)
 void Instance::period()
 {
     for (uint32_t p = 0; p < port_count; ++p) { buffers_[p][block] = kGuard; }
+    prepare_atom();
     uint32_t offset = 0;
     double duration = 0;
     while (offset < block) {
         rng_ ^= rng_ << 13; rng_ ^= rng_ >> 17; rng_ ^= rng_ << 5;
         const uint32_t count = random_slices ? std::min(1 + rng_ % 97, block - offset) : block;
         connect(offset);
+        if (atom_per_slice && offset) {
+            read_atom();
+            prepare_atom();
+        }
         const auto start = std::chrono::steady_clock::now();
         descriptor->run(handle, count);
         duration += std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - start).count();
         offset += count;
     }
+    read_atom();
     if (measure) { run_times.push_back(duration); }
     for (uint32_t p = 0; p < port_count; ++p) {
         if (buffers_[p][block] != kGuard) {
             throw std::runtime_error("write past the end of a period, port " + std::to_string(p));
         }
+    }
+}
+
+void Instance::prepare_atom()
+{
+    auto* atom = reinterpret_cast<LV2_Atom*>(atom_.data());
+    atom->type = chunk_;
+    atom->size = kAtomBytes - sizeof(LV2_Atom);
+}
+
+// The strings in the sequence Reel wrote (nothing if it wrote none).
+void Instance::read_atom()
+{
+    if (lfo || !record_lists) { return; }
+    const auto* seq = reinterpret_cast<const LV2_Atom_Sequence*>(atom_.data());
+    if (seq->atom.type != sequence_) { return; }
+    require(seq->atom.size >= sizeof(LV2_Atom_Sequence_Body) && seq->atom.size <= kAtomBytes - sizeof(LV2_Atom),
+            "t_keyframes: sequence size");
+    LV2_ATOM_SEQUENCE_FOREACH(seq, ev)
+    {
+        require(ev->body.type == string_ && ev->body.size > 0, "t_keyframes: atom:String events");
+        const char* text = reinterpret_cast<const char*>(ev + 1);
+        require(text[ev->body.size - 1] == 0, "t_keyframes: NUL-terminated");
+        lists.push_back({frame, std::string(text)});
     }
 }
 

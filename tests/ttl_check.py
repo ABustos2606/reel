@@ -17,6 +17,8 @@ DOAP = Namespace("http://usefulinc.com/ns/doap#")
 UNITS = Namespace("http://lv2plug.in/ns/extensions/units#")
 STATE = Namespace("http://lv2plug.in/ns/ext/state#")
 URID = Namespace("http://lv2plug.in/ns/ext/urid#")
+ATOM = Namespace("http://lv2plug.in/ns/ext/atom#")
+RSZ = Namespace("http://lv2plug.in/ns/ext/resize-port#")
 REEL = URIRef("https://github.com/ABustos2606/reel#reel")
 LFO = URIRef("https://github.com/ABustos2606/reel#lfo")
 
@@ -29,25 +31,27 @@ def four(*names):
 # and new ports are appended.
 PLUGINS = {
     REEL: {
-        "enum": "Port", "file": "reel.ttl", "name": "Reel", "count": 40, "hosts": "reel-defaults",
+        "enum": "Port", "file": "reel.ttl", "name": "Reel", "count": 41, "hosts": "reel-defaults",
         "class": LV2.MixerPlugin, "state": True,
         "permanent": four("in") + four("out") + ["mix", "frame", "frame_cv_amount"] + four("ch")
         + ["add", "delete", "clear_all"] + four("easing") + four("response") + ["mode", "output", "frame_cv"]
-        + four("level") + ["trigger", "enabled", "t_frame", "t_count", "t_active", "t_nearest", "t_step"],
+        + four("level") + ["trigger", "enabled", "t_frame", "t_count", "t_active", "t_nearest", "t_step", "t_keyframes"],
     },
     LFO: {
-        "enum": "LfoPort", "file": "reel_lfo.ttl", "name": "Reel LFO", "count": 10, "hosts": "lfo-defaults",
+        "enum": "LfoPort", "file": "reel_lfo.ttl", "name": "Reel LFO", "count": 13, "hosts": "lfo-defaults",
         "class": LV2.OscillatorPlugin, "state": False,
-        "permanent": ["rate", "shape", "shape_spread", "spread", "coupling", "rate_cv"] + four("out"),
+        "permanent": ["rate", "shape", "shape_spread", "spread", "coupling", "rate_cv"] + four("out") + ["bpm", "sync", "note"],
     },
 }
 # "Frame" (the position control) and "keyframes" are ordinary words; the
 # module's name, "Frames", is not.
 FORBIDDEN = re.compile(r"mutable|\bframes\b|gillet|emilie", re.I)
-TOGGLES = {"add", "delete", "clear_all", "enabled"}
+TOGGLES = {"add", "delete", "clear_all", "enabled", "sync"}
 # Upstream's EasingCurve order (keyframer.h), so the glue passes values through.
 EASING = {0: "Step", 1: "Linear", 2: "In quartic", 3: "Out quartic", 4: "Sine", 5: "Bounce"}
 MODE = {0: "Keyframes", 1: "Sequencer"}
+# Reel LFO's Note, in src/reel_lfo.cpp's kNoteBeats order.
+NOTE = {0: "8 bars", 1: "4 bars", 2: "2 bars", 3: "1 bar", 4: "1/2", 5: "1/4", 6: "1/8", 7: "1/16"}
 
 
 def require(condition, message):
@@ -59,7 +63,7 @@ def declared_ports(enum):
     header = (ROOT / "src/ports.hpp").read_text(encoding="utf-8")
     body = re.search(rf"enum class {enum} : uint32_t \{{(.*?)\}};", header, re.S)
     require(body is not None, f"missing {enum} enum")
-    declared = re.findall(r"(\w+)\s*=\s*(\d+),\s*//\s*(audio_in|audio_out|control_in|control_out|cv_in|cv_out)", body[1])
+    declared = re.findall(r"(\w+)\s*=\s*(\d+),\s*//\s*(audio_in|audio_out|control_in|control_out|cv_in|cv_out|atom_out)", body[1])
     # C++ names that are keywords carry a trailing underscore (delete_).
     return {int(index): (symbol.rstrip("_"), kind) for symbol, index, kind in declared}, body[1], len(declared)
 
@@ -100,9 +104,9 @@ def check_plugin(bundle, uri, spec):
         require(not FORBIDDEN.search(name), f"{symbol}: name names the original")
         types = set(graph.objects(port, RDF.type))
         directions = types & {LV2.InputPort, LV2.OutputPort}
-        kinds = types & {LV2.AudioPort, LV2.ControlPort, LV2.CVPort}
+        kinds = types & {LV2.AudioPort, LV2.ControlPort, LV2.CVPort, ATOM.AtomPort}
         require(len(directions) == len(kinds) == 1, f"{symbol}: ambiguous port kind")
-        kind = {LV2.AudioPort: "audio", LV2.ControlPort: "control", LV2.CVPort: "cv"}[next(iter(kinds))]
+        kind = {LV2.AudioPort: "audio", LV2.ControlPort: "control", LV2.CVPort: "cv", ATOM.AtomPort: "atom"}[next(iter(kinds))]
         kind += "_in" if LV2.InputPort in types else "_out"
         actual[index] = (symbol, kind)
         lo, hi = graph.value(port, LV2.minimum), graph.value(port, LV2.maximum)
@@ -125,13 +129,24 @@ def check_plugin(bundle, uri, spec):
                     f"{symbol}: labels follow EasingCurve, default Linear")
         if symbol == "mode":
             require(labels == MODE, "mode labels")
+        if symbol == "note":
+            require(labels == NOTE and float(graph.value(port, LV2.default)) == 3, "note: lengths, default 1 bar")
+        if symbol == "bpm":
+            require(graph.value(port, UNITS.unit) == UNITS.bpm and (float(lo), float(hi)) == (30, 300),
+                    "bpm: Peepo's tempo range")
         if symbol in TOGGLES:
             require(LV2.toggled in props, f"{symbol}: toggled")
         if symbol == "enabled":
             require(graph.value(port, LV2.designation) == LV2.enabled, "enabled: designation")
         if symbol == "output":
             require(graph.value(port, UNITS.unit) == UNITS.db and (float(lo), float(hi)) == (-24, 12), "output: dB")
-        if symbol.startswith("t_") and symbol != "t_frame":
+        if kind == "atom_out":
+            # The keyframe list for the page (src/telemetry.hpp): strings in a
+            # sequence, room for 64 keyframes.
+            require(graph.value(port, ATOM.bufferType) == ATOM.Sequence and
+                    set(graph.objects(port, ATOM.supports)) == {ATOM.String} and
+                    int(graph.value(port, RSZ.minimumSize)) >= 4096, f"{symbol}: string sequence, 4096 bytes")
+        if symbol.startswith("t_") and kind == "control_out" and symbol != "t_frame":
             require(LV2.integer in props, f"{symbol}: integer telemetry")
         if kind == "cv_in":
             require((float(lo), float(hi)) == (-1, 1), f"{symbol}: CV range is 1.0 = 5 V, +-5 V")

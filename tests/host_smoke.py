@@ -82,6 +82,24 @@ class Protocol:
                 require(allow_error or self.last_status == 0, f"Ingen {verb}: {text}")
                 return text
 
+    def notifications(self, pattern, timeout=3.0):
+        """Reads what the engine sends until `pattern` matches a message; returns the match."""
+        deadline = time.monotonic() + timeout
+        while True:
+            while b"\0" in self.buffer:
+                data, self.buffer = self.buffer.split(b"\0", 1)
+                text = data.decode()
+                self.transcript.write("RECV " + text + "\n")
+                match = re.search(pattern, text, re.S)
+                if match:
+                    return match
+            remaining = deadline - time.monotonic()
+            require(remaining > 0, f"no notification matching {pattern}")
+            self.socket.settimeout(remaining)
+            data = self.socket.recv(65536)
+            require(data, "Ingen closed its socket")
+            self.buffer += data
+
     def close(self):
         self.socket.close()
         self.transcript.close()
@@ -129,6 +147,14 @@ def vca_gain(level, response):
     v_linear = -(2 / 3) * math.log10(floored)
     v_exponential = 2.5 * (1 - x)
     return 10 ** (-1.5 * (v_linear + balance * (v_exponential - v_linear)))
+
+
+
+def decode_list(text):
+    """src/telemetry.hpp: "1:" then 24 hex digits a keyframe (position, id, levels 1-4)."""
+    require(text.startswith("1:") and (len(text) - 2) % 24 == 0, f"list format: {text[:40]}")
+    words = [int(text[i:i + 4], 16) for i in range(2, len(text), 4)]
+    return [(words[k], words[k + 1], tuple(words[k + 2:k + 6])) for k in range(0, len(words), 6)]
 
 
 def main():
@@ -217,12 +243,17 @@ def main():
         print(f"PASS jalv: Reel loads; Out 2 {out_2:.3f}, Mix {mix:.3f} (tone {TONE}), Level out 2 {level_2:.3f}",
               flush=True)
 
-        lfo = launch("jalv-lfo", ["jalv", "-i", "-n", "reel_lfo_jalv", LFO_URI])
+        # Reel LFO at Rate 0.6 (about 3 Hz), Spread 0.75: four phases.
+        lfo = launch("jalv-lfo", ["jalv", "-i", "-n", "reel_lfo_jalv", "-c", "rate=0.6", "-c", "spread=0.75", LFO_URI])
         wait_for(lambda: bool(probe.get_ports("reel_lfo_jalv:out_4")), "jalv did not load Reel LFO")
         time.sleep(0.5)
         require(lfo.poll() is None, "jalv failed during Reel LFO activation")
+        capture("reel_lfo_jalv:out_1", "reel_lfo_jalv:out_2", "reel_lfo_jalv:out_4")
+        peaks = listen(1.0)
+        require(all(0.9 < p <= 1.0 for p in peaks), f"jalv: Reel LFO peaks {peaks}")
         stop(lfo)
-        print("PASS jalv: Reel LFO loads", flush=True)
+        print(f"PASS jalv: Reel LFO runs; outputs 1, 2 and 4 peak at {', '.join(f'{p:.3f}' for p in peaks)}",
+              flush=True)
 
         for threads in (1, 4):
             path = Path(f"/tmp/{server_name}-{threads}.sock")
@@ -285,6 +316,21 @@ def main():
             print(f"PASS Ingen: two keyframes added through Frame, Level and Add; Level out 2 "
                   f"{heard[0]:.3f} and {heard[1]:.3f} at them; {threads} threads", flush=True)
 
+            # The page's telemetry: a client that sets ingen:broadcast on
+            # t_keyframes gets the list as ingen:activity, a string (Peepo
+            # watches outputs so).
+            protocol.request("Set", "patch:subject <ingen:/main/reel/t_keyframes> ; "
+                             "patch:property ingen:broadcast ; patch:value true")
+            match = protocol.notifications(r'reel/t_keyframes>.*?ingen:activity.*?"(1:[0-9a-f]*)"')
+            listed = decode_list(match[1])
+            require([(p, levels) for p, _, levels in listed] ==
+                    [(code(p), tuple(code(x) for x in levels)) for p, levels in KEYFRAMES],
+                    f"Ingen: the list a watching client gets: {listed}")
+            protocol.request("Set", "patch:subject <ingen:/main/reel/t_keyframes> ; "
+                             "patch:property ingen:broadcast ; patch:value false")
+            print(f"PASS Ingen: a client watching t_keyframes gets the list ({len(match[1])} characters, "
+                  f"{len(listed)} keyframes, positions and levels right); {threads} threads", flush=True)
+
             # Level 2 at 0.6 and 3 at 0 with Frame between the keyframes edit
             # none; then Frame moves onto the second keyframe (Level 2 0.25)
             # and the patch is saved so. A host that loaded the Level values
@@ -334,6 +380,8 @@ def main():
             wait_for(lambda: bool(probe.get_ports(f"{client}:cv_out")), "Ingen JACK outputs (reload)")
             capture(f"{client}:cv_out", f"{client}:cv_out", f"{client}:cv_out")
             protocol.set("restored/reel", "enabled", 1)
+            require(protocol.value("ingen:/main/restored/reel/mode") == 1, "Mode (Sequencer) restores")
+            protocol.set("restored/reel", "mode", 0)
             heard = []
             for position, levels in KEYFRAMES:
                 protocol.set("restored/reel", "frame", position)

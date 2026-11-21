@@ -14,8 +14,8 @@
     doap:maintainer [ foaf:name "Alejandro Bustos" ; foaf:homepage <https://github.com/ABustos2606> ] ;
     doap:homepage <https://github.com/ABustos2606/reel> ;
     doap:description "Made from the open-source code of Frames, a eurorack module by Emilie Gillet (MIT license)." ;
-    rdfs:comment "Four related LFOs. Rate sets the speed, Shape morphs the waveform, Shape spread gives each next output a different shape, Spread offsets their phases (above the centre) or slows each next one (below), and Coupling lets each output bend its neighbour's phase. Outputs are CV from 0 to 1." ;
-    lv2:minorVersion 1 ;
+    rdfs:comment "Four related LFOs. Rate sets the speed, Shape morphs the waveform, Shape spread gives each next output a different shape, Spread offsets their phases (above the centre) or speeds up each next one (below), and Coupling lets each output bend its neighbour's phase. With Tempo sync on, each cycle lasts the Note at the BPM instead of following Rate. Outputs are CV from 0 to 1." ;
+    lv2:minorVersion 2 ;
     lv2:microVersion 0 ;
     lv2:optionalFeature lv2:hardRTCapable ;
     lv2:port
@@ -104,4 +104,35 @@
         lv2:name "Out 4" ;
         lv2:minimum 0 ;
         lv2:maximum 1
+    ],
+    [
+        a lv2:InputPort, lv2:ControlPort ;
+        lv2:index 10 ;
+        lv2:symbol "bpm" ;
+        lv2:name "BPM" ;
+        lv2:minimum 30 ;
+        lv2:maximum 300 ;
+        lv2:default 120 ;
+        units:unit units:bpm
+    ],
+    [
+        a lv2:InputPort, lv2:ControlPort ;
+        lv2:index 11 ;
+        lv2:symbol "sync" ;
+        lv2:name "Tempo sync" ;
+        lv2:minimum 0 ;
+        lv2:maximum 1 ;
+        lv2:default 0 ;
+        lv2:portProperty lv2:toggled
+    ],
+    [
+        a lv2:InputPort, lv2:ControlPort ;
+        lv2:index 12 ;
+        lv2:symbol "note" ;
+        lv2:name "Note" ;
+        lv2:minimum 0 ;
+        lv2:maximum 7 ;
+        lv2:default 3 ;
+        lv2:portProperty lv2:integer, lv2:enumeration ;
+        lv2:scalePoint [ rdfs:label "8 bars" ; rdf:value 0 ], [ rdfs:label "4 bars" ; rdf:value 1 ], [ rdfs:label "2 bars" ; rdf:value 2 ], [ rdfs:label "1 bar" ; rdf:value 3 ], [ rdfs:label "1/2" ; rdf:value 4 ], [ rdfs:label "1/4" ; rdf:value 5 ], [ rdfs:label "1/8" ; rdf:value 6 ], [ rdfs:label "1/16" ; rdf:value 7 ]
     ] .

@@ -5,6 +5,7 @@
 #include "editing.hpp"
 #include "keyframe_state.hpp"
 #include "ports.hpp"
+#include "telemetry.hpp"
 #include "trigger.hpp"
 
 #include "frames/keyframer.h"
@@ -51,6 +52,8 @@ private:
     void write(Port port, float value) const noexcept;
     void read_controls() noexcept;
     void evaluate(uint32_t frame) noexcept;
+    uint16_t sequencer_frame(uint32_t frame) noexcept;
+    void publish() noexcept;
     int16_t nearest_index() const noexcept;
 
     float* ports_[kPortCount] = {};
@@ -58,7 +61,9 @@ private:
     frames::Keyframer keyframer_;
     Editor editor_;
     Trigger trigger_;
+    ListTelemetry list_;
 
+    double rate_;
     float frame_smoothing_;
     float output_smoothing_;
     uint32_t trigger_frames_;
@@ -84,6 +89,11 @@ private:
     uint32_t bypass_ = 0;
     uint16_t effective_frame_ = 0;
     bool first_ = true;
+    // The sequencer (plan, 4.4): its step, kept across mode changes, and its
+    // clock detector, from frames.cc.
+    bool sequencer_ = false;
+    uint8_t step_ = 0;
+    bool step_armed_ = false;
 
     // Controls read once per run(), applied at its grid frames.
     EditInputs inputs_;

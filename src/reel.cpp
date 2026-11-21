@@ -72,12 +72,15 @@ Reel* Reel::create(double rate, const LV2_Feature* const* features) noexcept
         if (std::strcmp((*f)->URI, LV2_URID__map) == 0) { map = static_cast<const LV2_URID_Map*>((*f)->data); }
     }
     auto* reel = new (std::nothrow) Reel(rate, StateKeys::map(map));
-    if (reel) { reel->activate(); }
+    if (reel) {
+        reel->list_.map(map);
+        reel->activate();
+    }
     return reel;
 }
 
 Reel::Reel(double rate, const StateKeys& keys) noexcept
-    : keys_(keys), frame_smoothing_(smoothing(kFrameSmoothingSeconds, rate)),
+    : keys_(keys), rate_(rate), frame_smoothing_(smoothing(kFrameSmoothingSeconds, rate)),
       output_smoothing_(smoothing(kOutputSmoothingSeconds, rate)),
       trigger_frames_(static_cast<uint32_t>(std::lround(kTriggerSeconds * rate))),
       bypass_frames_(std::max<uint32_t>(1, static_cast<uint32_t>(std::lround(kBypassSeconds * rate)))),
@@ -90,7 +93,8 @@ Reel::Reel(double rate, const StateKeys& keys) noexcept
 
 void Reel::connect(uint32_t index, void* data) noexcept
 {
-    if (index < kPortCount) { ports_[index] = static_cast<float*>(data); }
+    if (index == reel::index(Port::t_keyframes)) { list_.connect(data); }
+    else if (index < kPortCount) { ports_[index] = static_cast<float*>(data); }
 }
 
 // What the hardware's Keyframer::Init does on a fresh unit (it does nothing
@@ -108,12 +112,15 @@ void Reel::activate() noexcept
         keyframer_.set_immediate(c, 0);
     }
     load_keyframes(keyframer_, scratch_);
-    published_.publish(keyframer_);
+    publish();
     // Sets position() and nearest_keyframe() before the first run() reports
     // them.
     keyframer_.Evaluate(0);
     editor_.reset();
     trigger_.reset(trigger_frames_);
+    list_.reset(rate_);
+    step_ = 0;
+    step_armed_ = false;
     inputs_ = EditInputs{};
     gain_valid_ = false;
     grid_ = 0;
@@ -152,6 +159,7 @@ void Reel::read_controls() noexcept
         easing_[c] = static_cast<frames::EasingCurve>(std::lround(control(nth(Port::easing_1, c), 1.0f, 0.0f, 5.0f)));
         response_[c] = response_code(control(nth(Port::response_1, c), 0.0f, 0.0f, 1.0f));
     }
+    sequencer_ = std::lround(control(Port::mode, 0.0f, 0.0f, 1.0f)) == 1;
     const bool add = control(Port::add, 0.0f, 0.0f, 1.0f) > 0.5f;
     const bool remove = control(Port::delete_, 0.0f, 0.0f, 1.0f) > 0.5f;
     const bool clear = control(Port::clear_all, 0.0f, 0.0f, 1.0f) > 0.5f;
@@ -182,6 +190,32 @@ int16_t Reel::nearest_index() const noexcept
     return right < left ? position : static_cast<int16_t>(position - 1);
 }
 
+// Every change to the list goes to save and to the page (plan, section 5).
+void Reel::publish() noexcept
+{
+    published_.publish(keyframer_);
+    list_.changed();
+}
+
+// Sequencer mode (plan, 4.4), from frames.cc's main loop: Frame CV alone is
+// the clock (not scaled by Frame CV amount). Below 1/3 of full scale it arms,
+// above 2/3 when armed it disarms and steps; the step wraps at the number of
+// keyframes, and Frame is that keyframe's position. With no keyframes the
+// levels are the immediate ones, as upstream (Evaluate ignores Frame then).
+uint16_t Reel::sequencer_frame(uint32_t frame) noexcept
+{
+    // frames.cc compares the 16-bit modulation with 21845 and 43690.
+    const float modulation = signal(Port::frame_cv, frame) * 65535.0f;
+    if (modulation < 21845.0f) { step_armed_ = true; }
+    if (modulation > 43690.0f && step_armed_) {
+        step_armed_ = false;
+        ++step_;
+    }
+    const uint16_t count = keyframer_.num_keyframes();
+    if (step_ >= count) { step_ = 0; }
+    return count ? keyframer_.keyframe(step_).timestamp : 0;
+}
+
 // One grid frame (implementation plan, 4.1).
 void Reel::evaluate(uint32_t frame) noexcept
 {
@@ -190,20 +224,25 @@ void Reel::evaluate(uint32_t frame) noexcept
     // between finds one or the other.
     if (pending_.take(scratch_)) {
         load_keyframes(keyframer_, scratch_);
-        published_.publish(keyframer_);
+        publish();
         pending_.release();
         editor_.reset(load_steps_);
     }
     const EditInputs in = inputs_;
     inputs_.add = inputs_.remove = inputs_.clear = false;
-    if (editor_.apply(keyframer_, in)) { published_.publish(keyframer_); }
+    if (editor_.apply(keyframer_, in)) { publish(); }
 
     // 2. Frame: the smoothed control plus Frame CV times its amount, clamped,
-    // in the keyframer's units (frames.cc).
-    const float position = std::clamp(frame_ + signal(Port::frame_cv, frame) *
+    // in the keyframer's units (frames.cc); in Sequencer mode, the step's
+    // keyframe.
+    if (sequencer_) {
+        effective_frame_ = sequencer_frame(frame);
+    } else {
+        const float position = std::clamp(frame_ + signal(Port::frame_cv, frame) *
                                                    control(Port::frame_cv_amount, 1.0f, -1.0f, 1.0f),
                                       0.0f, 1.0f);
-    effective_frame_ = to_code(position);
+        effective_frame_ = to_code(position);
+    }
 
     // 3. Easing and response from the ports, then Evaluate.
     for (uint8_t c = 0; c < frames::kNumChannels; ++c) {
@@ -286,7 +325,8 @@ void Reel::run(uint32_t frames) noexcept
     write(Port::t_count, static_cast<float>(keyframer_.num_keyframes()));
     write(Port::t_active, static_cast<float>(editor_.active()));
     write(Port::t_nearest, static_cast<float>(nearest_index()));
-    write(Port::t_step, 0.0f);
+    write(Port::t_step, static_cast<float>(step_));
+    list_.run(keyframer_, frames);
 }
 
 // Save may run while run() does (Ingen saves from its own thread): it reads

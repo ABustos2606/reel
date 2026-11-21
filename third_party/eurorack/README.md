@@ -27,3 +27,7 @@ Applied by `tools/vendor.sh` from `tools/patches/`; each changed line is marked 
   - `Evaluate` read `keyframes_[64]` past the 64th keyframe to find the nearest keyframe. It reads 0 there, as the cleared slots after the last keyframe hold.
 
 Without the patch, `make test SAN=1` reports all three and the `easing` test fails on Bounce.
+
+## Build flag
+
+Not a change to the files. The vendored code is compiled with `-fwrapv` (milestone 2, 21 November 2026; `Makefile`, `VENDOR_FLAGS`). stmlib's `Interpolate824` and `Crossfade` for 8-bit tables (`stmlib/utils/dsp.h`, used by `PolyLfo::Render`) multiply a table step by a 24- or 16-bit fraction in `int`, which overflows: undefined behaviour, reported by `make test SAN=1`. Wrapped, as the hardware's arithmetic does, the product is off by a multiple of 2^32; after `>> 16` that is a multiple of 65536, which the functions' `int16_t` result drops, so the result is exact. `-fwrapv` makes the wrapping defined.

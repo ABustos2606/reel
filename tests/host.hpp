@@ -99,6 +99,18 @@ public:
     bool random_slices = true;
     bool measure = false;
     std::vector<double> run_times; // microseconds per period, when measuring
+    // t_keyframes: the strings Reel wrote, with the first frame of their
+    // period. Ingen prepares the atom output once per period (an atom:Chunk of
+    // its capacity) and runs every slice on it; jalv prepares it before every
+    // run(): `atom_per_slice`.
+    struct List {
+        uint64_t frame;
+        std::string text;
+    };
+    std::vector<List> lists;
+    bool atom_per_slice = false;
+    bool record_lists = true; // off where the test counts allocations
+    static constexpr uint32_t kAtomBytes = 4096; // rsz:minimumSize
 
 private:
     bool is_signal(uint32_t p) const { return lfo ? reel::is_lfo_signal(p) : reel::is_signal(p); }
@@ -107,6 +119,10 @@ private:
     void period();
     std::array<float, kMaxPorts> controls_{};
     std::array<std::vector<float>, kMaxPorts> buffers_;
+    std::vector<uint64_t> atom_; // 8-byte aligned
+    LV2_URID chunk_ = 0, sequence_ = 0, string_ = 0;
+    void prepare_atom();
+    void read_atom();
     uint32_t rng_ = 0x6A09E667;
 };
 

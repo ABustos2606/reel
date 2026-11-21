@@ -36,9 +36,13 @@ BASE_FLAGS = $(CPPFLAGS) $(CXXFLAGS) $(OPT) -std=c++17 -fPIC -fvisibility=hidden
 	-fno-fast-math -fno-math-errno -fno-trapping-math $(SAN_FLAGS)
 COMPILE_FLAGS = $(BASE_FLAGS) $(LV2_CFLAGS) -isystem $(VENDOR) -Wall -Wextra
 # Vendored code is kept as upstream wrote it; its warnings are not ours.
-VENDOR_FLAGS = $(BASE_FLAGS) -I$(VENDOR) -w
+# -fwrapv: stmlib's Interpolate824 and Crossfade for 8-bit tables (Reel
+# LFO) overflow int in an intermediate product; wrapped, as on the hardware,
+# the error is a multiple of 65536 that their int16_t result drops, so the
+# result is exact (third_party/eurorack/README.md).
+VENDOR_FLAGS = $(BASE_FLAGS) -I$(VENDOR) -w -fwrapv
 TEST_LIBS = -ldl -pthread
-TESTS := test_scaffold test_keyframes
+TESTS := test_scaffold test_keyframes test_lfo
 
 .PHONY: all install test test-timing test-hosts lint clean
 all: $(BUNDLE)/reel.so $(TTL_TARGETS)
@@ -70,7 +74,7 @@ $(BUILD_DIR)/test_scaffold: tests/test_scaffold.cpp tests/host.cpp tests/host.hp
 
 # The keyframe tests drive the vendored Keyframer directly too, to compare
 # the plugin with it.
-$(BUILD_DIR)/test_keyframes: tests/test_keyframes.cpp tests/host.cpp tests/host.hpp src/ports.hpp src/vca.hpp \
+$(BUILD_DIR)/test_keyframes: tests/test_keyframes.cpp tests/host.cpp tests/host.hpp src/ports.hpp src/vca.hpp src/telemetry.hpp \
 		$(BUILD_DIR)/obj/keyframe_state.o $(VENDOR_OBJECTS)
 	@mkdir -p "$(@D)"
 	$(CXX) $(COMPILE_FLAGS) tests/test_keyframes.cpp tests/host.cpp $(BUILD_DIR)/obj/keyframe_state.o \
@@ -80,10 +84,18 @@ test: all $(addprefix $(BUILD_DIR)/,$(TESTS))
 	$(PYTHON) tests/ttl_check.py $(BUNDLE)
 	$(BUILD_DIR)/test_scaffold $(BUNDLE)/reel.so
 	$(BUILD_DIR)/test_keyframes $(BUNDLE)/reel.so
+	$(BUILD_DIR)/test_lfo $(BUNDLE)/reel.so
 
-# rt_timing: 10 simulated minutes of random controls, edits and saves.
-test-timing: all $(BUILD_DIR)/test_keyframes
+# Reel LFO against the vendored PolyLfo driven directly.
+$(BUILD_DIR)/test_lfo: tests/test_lfo.cpp tests/host.cpp tests/host.hpp src/ports.hpp src/vca.hpp $(VENDOR_OBJECTS)
+	@mkdir -p "$(@D)"
+	$(CXX) $(COMPILE_FLAGS) tests/test_lfo.cpp tests/host.cpp $(VENDOR_OBJECTS) $(LDFLAGS) $(TEST_LIBS) -o $@
+
+# rt_timing: 10 simulated minutes of random controls, edits and saves; and
+# of Reel LFO with its controls moving.
+test-timing: all $(BUILD_DIR)/test_keyframes $(BUILD_DIR)/test_lfo
 	$(BUILD_DIR)/test_keyframes $(BUNDLE)/reel.so --timing
+	$(BUILD_DIR)/test_lfo $(BUNDLE)/reel.so --timing
 
 # jalv and Ingen with a private dummy JACK server; Ingen must be on PATH
 # (Peepo's tools/ingen-spike/env.sh sets it up).

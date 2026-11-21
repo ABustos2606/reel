@@ -2,7 +2,7 @@
 
 Reel is a keyframe mixer for Peepo, a pedal built on a Raspberry Pi 5 running the Ingen modular host. It stores up to 64 snapshots (keyframes) of four channel levels along a Frame axis; moving Frame, by hand or by CV, morphs the levels between them, with an easing curve per channel. The levels drive four VCAs and a mix, and come out as CV. Reel LFO, a second plugin in the bundle, is a four-output LFO with related shapes, phases and rates. It is an LV2 plugin made from the open-source code of Frames, a eurorack module by Emilie Gillet. Peepo shows Reel on a page of its own ([peepo-page.md](peepo-page.md)). It must also work as a normal LV2 plugin in Carla or Ardour, without that page.
 
-**Written:** 20 October 2026, from Peepo's `docs/38-eurorack-ports-roadmap.md` and a reading of Frames' source at `pichenettes/eurorack` commit `f4cfa7697095a28d292bff758beb51deb49b5a86` (12 October 2026). **Revised 20 November 2026** after reading every file Reel will use (`keyframer.*`, `poly_lfo.*`, `ui.*`, `frames.cc`, `drivers/dac.h`, `drivers/adc.h`, `drivers/system.cc`, `resources.h`, `resources/lookup_tables.py`) and Peepo's and Ingen's cable rules: how editing finds its keyframe, the step curve, the response curve and its floor, the trigger, the sequencer's clock, the LFO's controls and ranges, what flash storage does under `-DTEST`, and the audio-or-CV question were corrected or settled. **Status:** spec; milestone 0 built (21 November 2026); milestone 1 built and checked offline and in jalv and Ingen (21 November 2026), the Pi check to do. [implementation-plan.md](implementation-plan.md) says how to build it.
+**Written:** 20 October 2026, from Peepo's `docs/38-eurorack-ports-roadmap.md` and a reading of Frames' source at `pichenettes/eurorack` commit `f4cfa7697095a28d292bff758beb51deb49b5a86` (12 October 2026). **Revised 20 November 2026** after reading every file Reel will use (`keyframer.*`, `poly_lfo.*`, `ui.*`, `frames.cc`, `drivers/dac.h`, `drivers/adc.h`, `drivers/system.cc`, `resources.h`, `resources/lookup_tables.py`) and Peepo's and Ingen's cable rules: how editing finds its keyframe, the step curve, the response curve and its floor, the trigger, the sequencer's clock, the LFO's controls and ranges, what flash storage does under `-DTEST`, and the audio-or-CV question were corrected or settled. **Status:** spec; milestone 0 built (21 November 2026); milestone 1 built and checked offline and in jalv and Ingen (21 November 2026), the Pi check to do; milestone 2's Reel side (the sequencer, Reel LFO, the keyframe telemetry) built and checked offline and in jalv and Ingen (21 November 2026), the page waiting for its mockup's approval. [implementation-plan.md](implementation-plan.md) says how to build it.
 
 ## Why Frames
 
@@ -90,7 +90,7 @@ Hidden: ten Deletes with the Frame knob at zero (`frames.cc`, `PolyLfo`). Four L
 - **Frame (knob plus CV):** the rate, 13 octaves from 0.0134 Hz (Frame 0) to 110 Hz (Frame 1), one octave per 5040/65536 of Frame (`lut_increments`, made for a 24 kHz update rate).
 - **Knob 1, shape:** morphs through the wavetables.
 - **Knob 2, shape spread:** each next LFO's shape is offset by this much (centre: all the same).
-- **Knob 3, spread:** above the centre, the four LFOs keep one rate and are spread in phase; below it, each next LFO runs at a lower rate.
+- **Knob 3, spread:** above the centre, the four LFOs keep one rate and are spread in phase; below it, each next LFO runs at a higher rate, up to an octave each at the far end (`Render` adds `-5040 spread_ / 32768` per LFO, and `spread_` is negative there; this spec said "lower" until milestone 2 measured it).
 - **Knob 4, coupling:** each LFO's phase is modulated by its neighbour's sine, to the right above the centre, to the left below it.
 - **Outputs:** through the VCAs with linear response, so 0 to full level: unipolar, and with audio in the inputs four tremolos.
 
@@ -143,7 +143,7 @@ Symbols are fixed in milestone 0 and then never change; indices are in the plan.
 | Mode | Keyframes, Sequencer | five Adds | |
 | Output | dB, -24 to 12 | | On the mix only |
 
-Audio: In 1-4, Out 1-4 (input times gain), Mix. CV input: Frame CV. CV outputs: Level out 1-4 (the gain, 0 to 1), Trigger. Telemetry for the page: [peepo-page.md](peepo-page.md).
+Audio: In 1-4, Out 1-4 (input times gain), Mix. CV input: Frame CV. CV outputs: Level out 1-4 (the gain, 0 to 1), Trigger. Telemetry for the page: [peepo-page.md](peepo-page.md). The keyframe list goes to the page on an atom output, `t_keyframes`, as one string (settled in milestone 2; plan, 4.7).
 
 ### Reel LFO
 
@@ -152,10 +152,10 @@ Audio: In 1-4, Out 1-4 (input times gain), Mix. CV input: Frame CV. CV outputs: 
 | Rate | 0 to 1 | 0.0134 Hz to 110 Hz, an octave every 0.077 |
 | Shape | 0 to 1 | Through the wavetables |
 | Shape spread | 0 to 1, centre 0.5 | |
-| Spread | 0 to 1, centre 0.5 | Above: phase; below: rate |
+| Spread | 0 to 1, centre 0.5 | Above: phase; below: each next output faster |
 | Coupling | 0 to 1, centre 0.5 | |
 
-CV input: Rate CV (added to Rate; 1.0 is the whole range, as Frame CV). CV outputs: Out 1-4, 0 to 1. **Open:** a BPM port for the patch tempo.
+CV input: Rate CV (added to Rate; 1.0 is the whole range, as Frame CV; the sum is clamped to Rate's range). CV outputs: Out 1-4, the hardware's VCA gain at the LFO's DAC codes, 1/4096 to 1. **Open:** a BPM port for the patch tempo.
 
 ## Levels, floor and silence
 
@@ -210,18 +210,23 @@ Settled in milestone 1 (21 November 2026), as recommended:
 - **The nearest keyframe for the page:** `t_nearest` is the index of the keyframe nearest the effective Frame, counted from 0, not upstream's `nearest_keyframe()` (which the trigger still uses).
 - **Bounce fixed:** upstream's wraps where its curve falls; Reel's doesn't (plan, section 7).
 
+Settled in milestone 2 (21 November 2026):
+
+- **Telemetry of the keyframes,** as recommended: one atom output, `t_keyframes` (index 40, appended), sent when the list changes (at most 25 times a second) and every 0.5 s. The list is one string, `1:` then 24 hex digits per keyframe, because Ingen hands a watched atom output's events to its clients as Turtle literals and Peepo reads literals, not RDF lists (plan, 4.7). Checked through WSL's Ingen.
+- **Reel LFO's outputs** are the hardware's: the VCA's gain at `PolyLfo`'s DAC codes at linear response, 1/4096 to 1.
+- **Spread below its centre** speeds each next LFO up (measured; the spec said it slowed them).
+
 ## Open questions
 
 | Question | Why it matters | Recommendation | Settle by |
 | --- | --- | --- | --- |
 | Knobs editing a keyframe | Moving Frame onto a keyframe and then touching a level edits it; that can surprise | Keep the rule; the page highlights the active keyframe | Milestone 2, with the page |
-| Telemetry of the keyframes | The page needs 64 positions and 256 levels | One atom output, sent when the list changes | Milestone 2 |
 | Moving a keyframe | The hardware can't; the page could | A `commands` atom input, as Loo-pi's | Milestone 3 |
-| BPM for Reel LFO | Patch tempo | Decide after milestone 1 | Milestone 2 |
+| BPM for Reel LFO | Patch tempo | Not in `v0.2.0`. Peepo's convention is a BPM control of the module's own, named in its overlay entry (`"tempo": "<symbol>"`) and set from the patch tempo (Peepo `docs/29-parameters-files-tempo.md`): appended `bpm` and `sync` (Rate as a note length when on) controls would follow it. Asked in milestone 2 | Milestone 3 |
 
 ## Milestones
 
 - [x] Milestone 0 (21 November 2026, [record](milestone-0-validation.md)): vendored code, Makefile, LV2 glue and both `.ttl` files with the full port lists, state stubs. Reel passes audio through four VCAs at the Level controls. Loads in jalv and in Ingen under WSL. Tag `v0.0.1`.
 - [ ] Milestone 1: keyframes: Add, Delete, Clear all, editing, easing, response, Frame CV, the trigger, LV2 state saved and restored (jalv, Carla, Ingen). Pi xrun check. Tag `v0.1.0`. *Built 21 November 2026 ([record](milestone-1-validation.md)): offline tests on x86-64 and arm64, jalv and Ingen pass; Carla and the Pi check are to do.*
-- [ ] Milestone 2: the sequencer, Reel LFO, telemetry; Peepo's Reel page, first version, from an approved mockup. Tag `v0.2.0`.
+- [ ] Milestone 2: the sequencer, Reel LFO, telemetry; Peepo's Reel page, first version, from an approved mockup. Tag `v0.2.0`. *Reel side built 21 November 2026 ([record](milestone-2-validation.md)): offline tests on x86-64 and arm64, jalv and Ingen pass; the page's mockup (`docs/images/mockup-reel-*.png`) waits for approval.*
 - [ ] Milestone 3: the page complete (touch editing, moving keyframes if wanted), stomp bindings, listening on the Pi.

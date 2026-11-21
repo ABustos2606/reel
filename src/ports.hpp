@@ -53,7 +53,8 @@ enum class Port : uint32_t {
     t_active = 37,        // control_out
     t_nearest = 38,       // control_out
     t_step = 39,          // control_out
-    count = 40
+    t_keyframes = 40,     // atom_out
+    count = 41
 };
 
 // Reel LFO.
@@ -68,7 +69,10 @@ enum class LfoPort : uint32_t {
     out_2 = 7,        // cv_out
     out_3 = 8,        // cv_out
     out_4 = 9,        // cv_out
-    count = 10
+    bpm = 10,         // control_in
+    sync = 11,        // control_in
+    note = 12,        // control_in
+    count = 13
 };
 
 inline constexpr uint32_t kPortCount = static_cast<uint32_t>(Port::count);
@@ -87,6 +91,6 @@ inline constexpr bool is_signal(uint32_t i)
     return i <= index(Port::mix) || (i >= index(Port::frame_cv) && i <= index(Port::trigger));
 }
 
-inline constexpr bool is_lfo_signal(uint32_t i) { return i >= index(LfoPort::rate_cv) && i < kLfoPortCount; }
+inline constexpr bool is_lfo_signal(uint32_t i) { return i >= index(LfoPort::rate_cv) && i <= index(LfoPort::out_4); }
 
 } // namespace reel
