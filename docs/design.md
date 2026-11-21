@@ -2,7 +2,7 @@
 
 Reel is a keyframe mixer for Peepo, a pedal built on a Raspberry Pi 5 running the Ingen modular host. It stores up to 64 snapshots (keyframes) of four channel levels along a Frame axis; moving Frame, by hand or by CV, morphs the levels between them, with an easing curve per channel. The levels drive four VCAs and a mix, and come out as CV. Reel LFO, a second plugin in the bundle, is a four-output LFO with related shapes, phases and rates. It is an LV2 plugin made from the open-source code of Frames, a eurorack module by Emilie Gillet. Peepo shows Reel on a page of its own ([peepo-page.md](peepo-page.md)). It must also work as a normal LV2 plugin in Carla or Ardour, without that page.
 
-**Written:** 20 October 2026, from Peepo's `docs/38-eurorack-ports-roadmap.md` and a reading of Frames' source at `pichenettes/eurorack` commit `f4cfa7697095a28d292bff758beb51deb49b5a86` (12 October 2026). **Revised 20 November 2026** after reading every file Reel will use (`keyframer.*`, `poly_lfo.*`, `ui.*`, `frames.cc`, `drivers/dac.h`, `drivers/adc.h`, `drivers/system.cc`, `resources.h`, `resources/lookup_tables.py`) and Peepo's and Ingen's cable rules: how editing finds its keyframe, the step curve, the response curve and its floor, the trigger, the sequencer's clock, the LFO's controls and ranges, what flash storage does under `-DTEST`, and the audio-or-CV question were corrected or settled. **Status:** spec, nothing built. [implementation-plan.md](implementation-plan.md) says how to build it.
+**Written:** 20 October 2026, from Peepo's `docs/38-eurorack-ports-roadmap.md` and a reading of Frames' source at `pichenettes/eurorack` commit `f4cfa7697095a28d292bff758beb51deb49b5a86` (12 October 2026). **Revised 20 November 2026** after reading every file Reel will use (`keyframer.*`, `poly_lfo.*`, `ui.*`, `frames.cc`, `drivers/dac.h`, `drivers/adc.h`, `drivers/system.cc`, `resources.h`, `resources/lookup_tables.py`) and Peepo's and Ingen's cable rules: how editing finds its keyframe, the step curve, the response curve and its floor, the trigger, the sequencer's clock, the LFO's controls and ranges, what flash storage does under `-DTEST`, and the audio-or-CV question were corrected or settled. **Status:** spec; milestone 0 built (21 November 2026). [implementation-plan.md](implementation-plan.md) says how to build it.
 
 ## Why Frames
 
@@ -180,7 +180,7 @@ On restore the keyframes come from state and the Level controls keep their saved
 
 ## Bypass
 
-Ingen's own block bypass never calls `run()`; it copies audio input *n* to audio output *n*: In 1-4 to Out 1-4 at unity, the Mix silent, the CV outputs silent. A patch that uses Mix goes silent when bypassed. **Recommended:** an `lv2:enabled` port with `"bypass": "port"` in Peepo's overlay; off glides every gain to unity over 10 ms (Out n = In n, Mix = the sum of the inputs times Output), and holds the Level out ports. **Open** (below).
+Ingen's own block bypass never calls `run()`; it copies audio input *n* to audio output *n*: In 1-4 to Out 1-4 at unity, the Mix silent, the CV outputs silent. A patch that uses Mix goes silent when bypassed. **Settled (milestone 0):** an `lv2:enabled` port with `"bypass": "port"` in Peepo's overlay; off glides every gain to unity over 10 ms (Out n = In n, Mix = the sum of the inputs times Output), and holds the Level out ports.
 
 ## The Peepo page
 
@@ -199,11 +199,14 @@ Settled in this revision, from the sources (20 November 2026):
 - **Audio VCAs**, with Level CV outputs (section "Audio or CV").
 - **No hidden gestures**: Mode and the Reel LFO plugin replace them.
 
+Settled in milestone 0 (21 November 2026):
+
+- **Bypass port**, as recommended: `enabled` (index 34, `lv2:enabled`), so Peepo's overlay can say `"bypass": "port"`. Off glides every gain to unity (section "Bypass"); built in milestone 1, inert until then.
+
 ## Open questions
 
 | Question | Why it matters | Recommendation | Settle by |
 | --- | --- | --- | --- |
-| Bypass port | Without it a bypassed Reel silences its Mix | Add `enabled`, all gains to unity | Before milestone 0 (it is a port) |
 | Silence at level 0 | The hardware leaves -72 dB through | Level 0 is silence | Milestone 1 |
 | Level defaults | A fresh Reel with no keyframes plays its Level controls | 1 (all channels pass) | Milestone 1 |
 | Knobs editing a keyframe | Moving Frame onto a keyframe and then touching a level edits it; that can surprise | Keep the rule; the page highlights the active keyframe | Milestone 2, with the page |
@@ -213,7 +216,7 @@ Settled in this revision, from the sources (20 November 2026):
 
 ## Milestones
 
-- [ ] Milestone 0: vendored code, Makefile, LV2 glue and both `.ttl` files with the full port lists, state stubs. Reel passes audio through four VCAs at the Level controls. Loads in jalv and in Ingen under WSL. Tag `v0.0.1`.
+- [x] Milestone 0 (21 November 2026, [record](milestone-0-validation.md)): vendored code, Makefile, LV2 glue and both `.ttl` files with the full port lists, state stubs. Reel passes audio through four VCAs at the Level controls. Loads in jalv and in Ingen under WSL. Tag `v0.0.1`.
 - [ ] Milestone 1: keyframes: Add, Delete, Clear all, editing, easing, response, Frame CV, the trigger, LV2 state saved and restored (jalv, Carla, Ingen). Pi xrun check. Tag `v0.1.0`.
 - [ ] Milestone 2: the sequencer, Reel LFO, telemetry; Peepo's Reel page, first version, from an approved mockup. Tag `v0.2.0`.
 - [ ] Milestone 3: the page complete (touch editing, moving keyframes if wanted), stomp bindings, listening on the Pi.

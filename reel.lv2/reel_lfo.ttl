@@ -1,0 +1,107 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Alejandro Bustos
+@prefix lv2: <http://lv2plug.in/ns/lv2core#> .
+@prefix doap: <http://usefulinc.com/ns/doap#> .
+@prefix foaf: <http://xmlns.com/foaf/0.1/> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix units: <http://lv2plug.in/ns/extensions/units#> .
+
+<https://github.com/ABustos2606/reel#lfo>
+    a lv2:Plugin, lv2:OscillatorPlugin ;
+    doap:name "Reel LFO" ;
+    doap:license <https://spdx.org/licenses/MIT> ;
+    doap:maintainer [ foaf:name "Alejandro Bustos" ; foaf:homepage <https://github.com/ABustos2606> ] ;
+    doap:homepage <https://github.com/ABustos2606/reel> ;
+    doap:description "Made from the open-source code of Frames, a eurorack module by Emilie Gillet (MIT license)." ;
+    rdfs:comment "Four related LFOs. Rate sets the speed, Shape morphs the waveform, Shape spread gives each next output a different shape, Spread offsets their phases (above the centre) or slows each next one (below), and Coupling lets each output bend its neighbour's phase. Outputs are CV from 0 to 1." ;
+    lv2:minorVersion 0 ;
+    lv2:microVersion 1 ;
+    lv2:optionalFeature lv2:hardRTCapable ;
+    lv2:port
+    [
+        a lv2:InputPort, lv2:ControlPort ;
+        lv2:index 0 ;
+        lv2:symbol "rate" ;
+        lv2:name "Rate" ;
+        lv2:minimum 0 ;
+        lv2:maximum 1 ;
+        lv2:default 0.5
+    ],
+    [
+        a lv2:InputPort, lv2:ControlPort ;
+        lv2:index 1 ;
+        lv2:symbol "shape" ;
+        lv2:name "Shape" ;
+        lv2:minimum 0 ;
+        lv2:maximum 1 ;
+        lv2:default 0
+    ],
+    [
+        a lv2:InputPort, lv2:ControlPort ;
+        lv2:index 2 ;
+        lv2:symbol "shape_spread" ;
+        lv2:name "Shape spread" ;
+        lv2:minimum 0 ;
+        lv2:maximum 1 ;
+        lv2:default 0.5
+    ],
+    [
+        a lv2:InputPort, lv2:ControlPort ;
+        lv2:index 3 ;
+        lv2:symbol "spread" ;
+        lv2:name "Spread" ;
+        lv2:minimum 0 ;
+        lv2:maximum 1 ;
+        lv2:default 0.5
+    ],
+    [
+        a lv2:InputPort, lv2:ControlPort ;
+        lv2:index 4 ;
+        lv2:symbol "coupling" ;
+        lv2:name "Coupling" ;
+        lv2:minimum 0 ;
+        lv2:maximum 1 ;
+        lv2:default 0.5
+    ],
+    [
+        a lv2:InputPort, lv2:CVPort ;
+        lv2:index 5 ;
+        lv2:symbol "rate_cv" ;
+        lv2:name "Rate CV" ;
+        lv2:minimum -1 ;
+        lv2:maximum 1 ;
+        lv2:default 0
+    ],
+    [
+        a lv2:OutputPort, lv2:CVPort ;
+        lv2:index 6 ;
+        lv2:symbol "out_1" ;
+        lv2:name "Out 1" ;
+        lv2:minimum 0 ;
+        lv2:maximum 1
+    ],
+    [
+        a lv2:OutputPort, lv2:CVPort ;
+        lv2:index 7 ;
+        lv2:symbol "out_2" ;
+        lv2:name "Out 2" ;
+        lv2:minimum 0 ;
+        lv2:maximum 1
+    ],
+    [
+        a lv2:OutputPort, lv2:CVPort ;
+        lv2:index 8 ;
+        lv2:symbol "out_3" ;
+        lv2:name "Out 3" ;
+        lv2:minimum 0 ;
+        lv2:maximum 1
+    ],
+    [
+        a lv2:OutputPort, lv2:CVPort ;
+        lv2:index 9 ;
+        lv2:symbol "out_4" ;
+        lv2:name "Out 4" ;
+        lv2:minimum 0 ;
+        lv2:maximum 1
+    ] .

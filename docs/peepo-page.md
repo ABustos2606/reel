@@ -54,7 +54,7 @@ Watched only while the page is open, like the Tuner's `freq_out` and Loo-pi's lo
 | `t_frame` (35) | the effective Frame (control plus CV, or the sequencer's step), 0-1 |
 | `t_count` (36) | number of keyframes, 0-64 |
 | `t_active` (37) | the active keyframe, the editing target, or -1 |
-| `t_nearest` (38) | the keyframe nearest the effective Frame, or -1 |
+| `t_nearest` (38) | upstream's `nearest_keyframe()` at the effective Frame, -1 to 64 (declared range); -1 with no keyframes. Upstream counts it from 1 when Frame is nearer the keyframe after it, so milestone 1 checks what the page should be told |
 | `t_step` (39) | the sequencer's step |
 | `level_1` ... `level_4` (29-32) | current gains, 0-1 |
 | keyframe list | **Open, recommended:** one atom output, appended in milestone 2, carrying the whole list (position, id, four levels per keyframe) each time it changes and once when the page starts watching. 64 positions and 256 levels as control outputs would be 320 ports. Decide after checking what Peepo's Ingen adapter can watch |

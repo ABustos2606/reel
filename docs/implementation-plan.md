@@ -2,6 +2,8 @@
 
 **Written:** 20 October 2026. **Rewritten 20 November 2026** against the source, before any code: no vendored changes are needed (flash storage is compiled out by `-DTEST`), port indices (3), state with keyframe ids (3), the evaluation grid and the VCA's response curve in floating point (4.1, 4.3), editing as `ui.cc` really does it (4.2), the trigger's arming rule and the sequencer's clock (4.4), the LFO's update clock and range guard (4.5), state threading (5), the tests and the records. **Follows:** [design.md](design.md), the spec, and [peepo-page.md](peepo-page.md), the page contract. Where this plan and the spec disagree, the spec wins and this plan is fixed. **Checked against:** Frames' `keyframer.h/.cc`, `poly_lfo.h/.cc`, `ui.h/.cc`, `frames.cc`, `drivers/{adc.h,dac.h,system.cc}`, `resources.h` and `resources/lookup_tables.py` at upstream commit `f4cfa7697095a28d292bff758beb51deb49b5a86` (a checkout is in `C:\LV2-own-plugins\chamber\tmp\eurorack-src`); Ingen's `ArcImpl::can_connect` and Peepo's `src/core/model.cpp`; Loo-pi's plan and records for LV2 state under Ingen; Chamber's and Drizzle's for the build, tests and records.
 
+**Updated 21 November 2026, milestone 0** ([record](milestone-0-validation.md)): the bypass question settled (`enabled` declared); the C++ enum names port 16 `delete_` (a keyword) for the symbol `delete`; `t_nearest` ranges -1 to 64, since `nearest_keyframe()` can name the boundary after the last keyframe; the Reel LFO's descriptor is in `reel_lfo.cpp` with no header of its own; `save` stores no `reel#keyframes` key for an empty list (section 3: a missing key means no keyframes); `urid:map` is an optional feature (without it Reel runs and saves nothing).
+
 This plan says how to build Reel: code layout, ports, state, the VCAs, real-time rules, tests, milestones and records. Values that only use can settle are given a starting value and marked **tune**.
 
 ## 1. What Ingen's source changes
@@ -83,11 +85,11 @@ Port **symbols, URIs and state keys are permanent** once a patch has been saved 
 | 28 | `frame_cv` | Frame CV | CV in | 1.0 moves Frame across its whole range |
 | 29-32 | `level_1` ... `level_4` | Level out 1 ... | CV out | the gains, 0 to 1 |
 | 33 | `trigger` | Trigger | CV out | 1.0 for 10 ms **tune** |
-| 34 | `enabled` | On | toggle, `lv2:enabled` | 1 (if the spec's bypass question is settled as recommended; otherwise not declared) |
+| 34 | `enabled` | On | toggle, `lv2:enabled` | 1 (the spec's bypass question, settled in milestone 0) |
 | 35 | `t_frame` | Frame now | control out | effective Frame, 0-1 |
 | 36 | `t_count` | Keyframes | control out | 0-64 |
 | 37 | `t_active` | Active keyframe | control out | index of the active keyframe (editing target), or -1 |
-| 38 | `t_nearest` | Nearest keyframe | control out | `Keyframer::nearest_keyframe()` at the effective Frame, or -1 |
+| 38 | `t_nearest` | Nearest keyframe | control out | `Keyframer::nearest_keyframe()` at the effective Frame, -1 to 64 |
 | 39 | `t_step` | Step | control out | sequencer step, 0-63 |
 
 Reel's enumerations use upstream's numbers (`EasingCurve`), so the glue passes them through. Telemetry ports are read by Peepo's page only while it is open ([peepo-page.md](peepo-page.md)). The keyframe list itself (positions, ids, levels) is the open telemetry question: an atom output appended in milestone 2.
@@ -169,7 +171,7 @@ Rate: `rate + rate_cv`, clamped to [0, 1], times 65535, passed to `Render`. Upst
 
 ### 4.6 Bypass
 
-`enabled` off: every gain glides to unity over 10 ms (Out n = In n, Mix = the sum of the inputs times Output) and Level outs hold their last values; the keyframer keeps evaluating, so turning on again glides back to where Frame is. Exact passthrough when settled. Only if the spec's bypass question is settled as recommended.
+`enabled` off: every gain glides to unity over 10 ms (Out n = In n, Mix = the sum of the inputs times Output) and Level outs hold their last values; the keyframer keeps evaluating, so turning on again glides back to where Frame is. Exact passthrough when settled. Declared in milestone 0, built in milestone 1.
 
 ## 5. Real-time rules and threads, checked
 
@@ -222,7 +224,7 @@ None. Under `-DTEST`, `Keyframer::Init`, `Save` and `Calibrate` touch no storage
 
 Each has an end check. "Done" means the offline tests pass on x86-64 and arm64, plus the stated host checks. Each milestone ends with a record (section 10).
 
-- **Milestone 0, scaffolding.** The spec's bypass question settled. `tools/vendor.sh`, Makefile, both descriptors, both `.ttl` files with the full port lists, `ports.hpp`, state stubs, `ttl_check`, `scaffold`, `allocation`. Four VCAs at the Level controls. **Done when** `make`, `make install DESTDIR=...`, `lv2info` and `lv2lint` are clean, only `lv2_descriptor` is exported, and both plugins load in jalv and in Ingen under WSL. Tag `v0.0.1`.
+- **Milestone 0, scaffolding. Done 21 November 2026** (tag ready; see the [record](milestone-0-validation.md)). The spec's bypass question settled. `tools/vendor.sh`, Makefile, both descriptors, both `.ttl` files with the full port lists, `ports.hpp`, state stubs, `ttl_check`, `scaffold`, `allocation`. Four VCAs at the Level controls. **Done when** `make`, `make install DESTDIR=...`, `lv2info` and `lv2lint` are clean, only `lv2_descriptor` is exported, and both plugins load in jalv and in Ingen under WSL. Tag `v0.0.1`.
 - **Milestone 1, keyframes.** Editing, easing, response, Frame CV, trigger, bypass, state; `editing`, `easing`, `vca`, `trigger`, `state`, `slicing`, `bypass`, `instances`, `rt_timing`. Save and reload through jalv, Carla and Ingen. The spec's silence and default questions settled. Pi xrun check. Tag `v0.1.0`; Peepo adds its overlay entry and pinned build (generic page).
 - **Milestone 2, sequencer, LFO, telemetry, first page.** `sequencer`, `lfo`; the keyframe telemetry decided and appended. Peepo's Reel page, first version, from a mockup approved by the user before it is built. Tag `v0.2.0`.
 - **Milestone 3, the page.** Touch editing; moving keyframes if the user wants it (a `commands` input, appended); stomp bindings; listening on the Pi. `v0.2.x` or `v0.3.0`.

@@ -1,0 +1,393 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Alejandro Bustos
+@prefix lv2: <http://lv2plug.in/ns/lv2core#> .
+@prefix doap: <http://usefulinc.com/ns/doap#> .
+@prefix foaf: <http://xmlns.com/foaf/0.1/> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix units: <http://lv2plug.in/ns/extensions/units#> .
+@prefix state: <http://lv2plug.in/ns/ext/state#> .
+@prefix urid: <http://lv2plug.in/ns/ext/urid#> .
+
+<https://github.com/ABustos2606/reel#reel>
+    a lv2:Plugin, lv2:MixerPlugin ;
+    doap:name "Reel" ;
+    doap:license <https://spdx.org/licenses/MIT> ;
+    doap:maintainer [ foaf:name "Alejandro Bustos" ; foaf:homepage <https://github.com/ABustos2606> ] ;
+    doap:homepage <https://github.com/ABustos2606/reel> ;
+    doap:description "Made from the open-source code of Frames, a eurorack module by Emilie Gillet (MIT license)." ;
+    rdfs:comment "Keyframe mixer for four channels. Add stores the four Level settings at the current Frame as a keyframe; moving Frame, by hand or by Frame CV, morphs the levels between keyframes along each channel's easing curve. The levels set four VCAs and a mix, and come out as CV. In Sequencer mode each Frame CV pulse steps to the next keyframe. Keyframes are saved with the patch." ;
+    lv2:minorVersion 0 ;
+    lv2:microVersion 1 ;
+    lv2:optionalFeature lv2:hardRTCapable, urid:map ;
+    lv2:extensionData state:interface ;
+    lv2:port
+    [
+        a lv2:InputPort, lv2:AudioPort ;
+        lv2:index 0 ;
+        lv2:symbol "in_1" ;
+        lv2:name "In 1"
+    ],
+    [
+        a lv2:InputPort, lv2:AudioPort ;
+        lv2:index 1 ;
+        lv2:symbol "in_2" ;
+        lv2:name "In 2"
+    ],
+    [
+        a lv2:InputPort, lv2:AudioPort ;
+        lv2:index 2 ;
+        lv2:symbol "in_3" ;
+        lv2:name "In 3"
+    ],
+    [
+        a lv2:InputPort, lv2:AudioPort ;
+        lv2:index 3 ;
+        lv2:symbol "in_4" ;
+        lv2:name "In 4"
+    ],
+    [
+        a lv2:OutputPort, lv2:AudioPort ;
+        lv2:index 4 ;
+        lv2:symbol "out_1" ;
+        lv2:name "Out 1"
+    ],
+    [
+        a lv2:OutputPort, lv2:AudioPort ;
+        lv2:index 5 ;
+        lv2:symbol "out_2" ;
+        lv2:name "Out 2"
+    ],
+    [
+        a lv2:OutputPort, lv2:AudioPort ;
+        lv2:index 6 ;
+        lv2:symbol "out_3" ;
+        lv2:name "Out 3"
+    ],
+    [
+        a lv2:OutputPort, lv2:AudioPort ;
+        lv2:index 7 ;
+        lv2:symbol "out_4" ;
+        lv2:name "Out 4"
+    ],
+    [
+        a lv2:OutputPort, lv2:AudioPort ;
+        lv2:index 8 ;
+        lv2:symbol "mix" ;
+        lv2:name "Mix"
+    ],
+    [
+        a lv2:InputPort, lv2:ControlPort ;
+        lv2:index 9 ;
+        lv2:symbol "frame" ;
+        lv2:name "Frame" ;
+        lv2:minimum 0 ;
+        lv2:maximum 1 ;
+        lv2:default 0
+    ],
+    [
+        a lv2:InputPort, lv2:ControlPort ;
+        lv2:index 10 ;
+        lv2:symbol "frame_cv_amount" ;
+        lv2:name "Frame CV amount" ;
+        lv2:minimum -1 ;
+        lv2:maximum 1 ;
+        lv2:default 1
+    ],
+    [
+        a lv2:InputPort, lv2:ControlPort ;
+        lv2:index 11 ;
+        lv2:symbol "ch_1" ;
+        lv2:name "Level 1" ;
+        lv2:minimum 0 ;
+        lv2:maximum 1 ;
+        lv2:default 1
+    ],
+    [
+        a lv2:InputPort, lv2:ControlPort ;
+        lv2:index 12 ;
+        lv2:symbol "ch_2" ;
+        lv2:name "Level 2" ;
+        lv2:minimum 0 ;
+        lv2:maximum 1 ;
+        lv2:default 1
+    ],
+    [
+        a lv2:InputPort, lv2:ControlPort ;
+        lv2:index 13 ;
+        lv2:symbol "ch_3" ;
+        lv2:name "Level 3" ;
+        lv2:minimum 0 ;
+        lv2:maximum 1 ;
+        lv2:default 1
+    ],
+    [
+        a lv2:InputPort, lv2:ControlPort ;
+        lv2:index 14 ;
+        lv2:symbol "ch_4" ;
+        lv2:name "Level 4" ;
+        lv2:minimum 0 ;
+        lv2:maximum 1 ;
+        lv2:default 1
+    ],
+    [
+        a lv2:InputPort, lv2:ControlPort ;
+        lv2:index 15 ;
+        lv2:symbol "add" ;
+        lv2:name "Add" ;
+        lv2:minimum 0 ;
+        lv2:maximum 1 ;
+        lv2:default 0 ;
+        lv2:portProperty lv2:toggled
+    ],
+    [
+        a lv2:InputPort, lv2:ControlPort ;
+        lv2:index 16 ;
+        lv2:symbol "delete" ;
+        lv2:name "Delete" ;
+        lv2:minimum 0 ;
+        lv2:maximum 1 ;
+        lv2:default 0 ;
+        lv2:portProperty lv2:toggled
+    ],
+    [
+        a lv2:InputPort, lv2:ControlPort ;
+        lv2:index 17 ;
+        lv2:symbol "clear_all" ;
+        lv2:name "Clear all" ;
+        lv2:minimum 0 ;
+        lv2:maximum 1 ;
+        lv2:default 0 ;
+        lv2:portProperty lv2:toggled
+    ],
+    [
+        a lv2:InputPort, lv2:ControlPort ;
+        lv2:index 18 ;
+        lv2:symbol "easing_1" ;
+        lv2:name "Easing 1" ;
+        lv2:minimum 0 ;
+        lv2:maximum 5 ;
+        lv2:default 1 ;
+        lv2:portProperty lv2:integer, lv2:enumeration ;
+        lv2:scalePoint
+            [ rdfs:label "Step" ; rdf:value 0 ],
+            [ rdfs:label "Linear" ; rdf:value 1 ],
+            [ rdfs:label "In quartic" ; rdf:value 2 ],
+            [ rdfs:label "Out quartic" ; rdf:value 3 ],
+            [ rdfs:label "Sine" ; rdf:value 4 ],
+            [ rdfs:label "Bounce" ; rdf:value 5 ]
+    ],
+    [
+        a lv2:InputPort, lv2:ControlPort ;
+        lv2:index 19 ;
+        lv2:symbol "easing_2" ;
+        lv2:name "Easing 2" ;
+        lv2:minimum 0 ;
+        lv2:maximum 5 ;
+        lv2:default 1 ;
+        lv2:portProperty lv2:integer, lv2:enumeration ;
+        lv2:scalePoint
+            [ rdfs:label "Step" ; rdf:value 0 ],
+            [ rdfs:label "Linear" ; rdf:value 1 ],
+            [ rdfs:label "In quartic" ; rdf:value 2 ],
+            [ rdfs:label "Out quartic" ; rdf:value 3 ],
+            [ rdfs:label "Sine" ; rdf:value 4 ],
+            [ rdfs:label "Bounce" ; rdf:value 5 ]
+    ],
+    [
+        a lv2:InputPort, lv2:ControlPort ;
+        lv2:index 20 ;
+        lv2:symbol "easing_3" ;
+        lv2:name "Easing 3" ;
+        lv2:minimum 0 ;
+        lv2:maximum 5 ;
+        lv2:default 1 ;
+        lv2:portProperty lv2:integer, lv2:enumeration ;
+        lv2:scalePoint
+            [ rdfs:label "Step" ; rdf:value 0 ],
+            [ rdfs:label "Linear" ; rdf:value 1 ],
+            [ rdfs:label "In quartic" ; rdf:value 2 ],
+            [ rdfs:label "Out quartic" ; rdf:value 3 ],
+            [ rdfs:label "Sine" ; rdf:value 4 ],
+            [ rdfs:label "Bounce" ; rdf:value 5 ]
+    ],
+    [
+        a lv2:InputPort, lv2:ControlPort ;
+        lv2:index 21 ;
+        lv2:symbol "easing_4" ;
+        lv2:name "Easing 4" ;
+        lv2:minimum 0 ;
+        lv2:maximum 5 ;
+        lv2:default 1 ;
+        lv2:portProperty lv2:integer, lv2:enumeration ;
+        lv2:scalePoint
+            [ rdfs:label "Step" ; rdf:value 0 ],
+            [ rdfs:label "Linear" ; rdf:value 1 ],
+            [ rdfs:label "In quartic" ; rdf:value 2 ],
+            [ rdfs:label "Out quartic" ; rdf:value 3 ],
+            [ rdfs:label "Sine" ; rdf:value 4 ],
+            [ rdfs:label "Bounce" ; rdf:value 5 ]
+    ],
+    [
+        a lv2:InputPort, lv2:ControlPort ;
+        lv2:index 22 ;
+        lv2:symbol "response_1" ;
+        lv2:name "Response 1" ;
+        lv2:minimum 0 ;
+        lv2:maximum 1 ;
+        lv2:default 0
+    ],
+    [
+        a lv2:InputPort, lv2:ControlPort ;
+        lv2:index 23 ;
+        lv2:symbol "response_2" ;
+        lv2:name "Response 2" ;
+        lv2:minimum 0 ;
+        lv2:maximum 1 ;
+        lv2:default 0
+    ],
+    [
+        a lv2:InputPort, lv2:ControlPort ;
+        lv2:index 24 ;
+        lv2:symbol "response_3" ;
+        lv2:name "Response 3" ;
+        lv2:minimum 0 ;
+        lv2:maximum 1 ;
+        lv2:default 0
+    ],
+    [
+        a lv2:InputPort, lv2:ControlPort ;
+        lv2:index 25 ;
+        lv2:symbol "response_4" ;
+        lv2:name "Response 4" ;
+        lv2:minimum 0 ;
+        lv2:maximum 1 ;
+        lv2:default 0
+    ],
+    [
+        a lv2:InputPort, lv2:ControlPort ;
+        lv2:index 26 ;
+        lv2:symbol "mode" ;
+        lv2:name "Mode" ;
+        lv2:minimum 0 ;
+        lv2:maximum 1 ;
+        lv2:default 0 ;
+        lv2:portProperty lv2:integer, lv2:enumeration ;
+        lv2:scalePoint
+            [ rdfs:label "Keyframes" ; rdf:value 0 ],
+            [ rdfs:label "Sequencer" ; rdf:value 1 ]
+    ],
+    [
+        a lv2:InputPort, lv2:ControlPort ;
+        lv2:index 27 ;
+        lv2:symbol "output" ;
+        lv2:name "Output" ;
+        lv2:minimum -24 ;
+        lv2:maximum 12 ;
+        lv2:default 0 ;
+        units:unit units:db
+    ],
+    [
+        a lv2:InputPort, lv2:CVPort ;
+        lv2:index 28 ;
+        lv2:symbol "frame_cv" ;
+        lv2:name "Frame CV" ;
+        lv2:minimum -1 ;
+        lv2:maximum 1 ;
+        lv2:default 0
+    ],
+    [
+        a lv2:OutputPort, lv2:CVPort ;
+        lv2:index 29 ;
+        lv2:symbol "level_1" ;
+        lv2:name "Level out 1" ;
+        lv2:minimum 0 ;
+        lv2:maximum 1
+    ],
+    [
+        a lv2:OutputPort, lv2:CVPort ;
+        lv2:index 30 ;
+        lv2:symbol "level_2" ;
+        lv2:name "Level out 2" ;
+        lv2:minimum 0 ;
+        lv2:maximum 1
+    ],
+    [
+        a lv2:OutputPort, lv2:CVPort ;
+        lv2:index 31 ;
+        lv2:symbol "level_3" ;
+        lv2:name "Level out 3" ;
+        lv2:minimum 0 ;
+        lv2:maximum 1
+    ],
+    [
+        a lv2:OutputPort, lv2:CVPort ;
+        lv2:index 32 ;
+        lv2:symbol "level_4" ;
+        lv2:name "Level out 4" ;
+        lv2:minimum 0 ;
+        lv2:maximum 1
+    ],
+    [
+        a lv2:OutputPort, lv2:CVPort ;
+        lv2:index 33 ;
+        lv2:symbol "trigger" ;
+        lv2:name "Trigger" ;
+        lv2:minimum 0 ;
+        lv2:maximum 1
+    ],
+    [
+        a lv2:InputPort, lv2:ControlPort ;
+        lv2:index 34 ;
+        lv2:symbol "enabled" ;
+        lv2:name "On" ;
+        lv2:minimum 0 ;
+        lv2:maximum 1 ;
+        lv2:default 1 ;
+        lv2:portProperty lv2:toggled, lv2:integer ;
+        lv2:designation lv2:enabled
+    ],
+    [
+        a lv2:OutputPort, lv2:ControlPort ;
+        lv2:index 35 ;
+        lv2:symbol "t_frame" ;
+        lv2:name "Frame now" ;
+        lv2:minimum 0 ;
+        lv2:maximum 1
+    ],
+    [
+        a lv2:OutputPort, lv2:ControlPort ;
+        lv2:index 36 ;
+        lv2:symbol "t_count" ;
+        lv2:name "Keyframes" ;
+        lv2:minimum 0 ;
+        lv2:maximum 64 ;
+        lv2:portProperty lv2:integer
+    ],
+    [
+        a lv2:OutputPort, lv2:ControlPort ;
+        lv2:index 37 ;
+        lv2:symbol "t_active" ;
+        lv2:name "Active keyframe" ;
+        lv2:minimum -1 ;
+        lv2:maximum 63 ;
+        lv2:portProperty lv2:integer
+    ],
+    [
+        a lv2:OutputPort, lv2:ControlPort ;
+        lv2:index 38 ;
+        lv2:symbol "t_nearest" ;
+        lv2:name "Nearest keyframe" ;
+        lv2:minimum -1 ;
+        lv2:maximum 64 ;
+        lv2:portProperty lv2:integer
+    ],
+    [
+        a lv2:OutputPort, lv2:ControlPort ;
+        lv2:index 39 ;
+        lv2:symbol "t_step" ;
+        lv2:name "Step" ;
+        lv2:minimum 0 ;
+        lv2:maximum 63 ;
+        lv2:portProperty lv2:integer
+    ] .
