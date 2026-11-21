@@ -134,9 +134,13 @@ inline uint16_t Keyframer::Easing(
     const uint16_t* easing_curve = lookup_table_table[
         curve - EASING_CURVE_IN_QUARTIC];
     int32_t scale_a = easing_curve[scale >> 6];
-    int32_t scale_b = easing_curve[(scale >> 6) + 1];
+    // Reel: at scale 65536 (Frame on the right keyframe) the next entry is
+    // past the table's 1025; its weight is 0 there, so read the last one.
+    int32_t scale_b = easing_curve[(scale >> 6) + ((scale >> 6) < 1024 ? 1 : 0)];
+    // Reel: the fraction as int32_t. As an unsigned it turns the product
+    // unsigned where the table falls (Bounce), 131072 too high.
     shaped_scale = scale_a + (((scale_b - scale_a) >> 1) * \
-      ((scale << 10) & 0xffff) >> 15);
+      static_cast<int32_t>((scale << 10) & 0xffff) >> 15);
   }
   return from + ((to - from) * (shaped_scale >> 1) >> 15);
 }
@@ -248,7 +252,10 @@ void Keyframer::Evaluate(uint16_t timestamp) {
     }
     uint16_t t_this = timestamp - \
         (position == 0 ? 0 : keyframes_[position - 1].timestamp);
-    uint16_t t_next = keyframes_[position].timestamp - timestamp;
+    // Reel: past the 64th keyframe, keyframes_[64] is out of bounds; read 0,
+    // as the cleared slots after the last keyframe hold.
+    uint16_t t_next = (position < kMaxNumKeyframe ?
+        keyframes_[position].timestamp : 0) - timestamp;
     nearest_keyframe_ = t_next < t_this ? position + 1 : position;
   }
   

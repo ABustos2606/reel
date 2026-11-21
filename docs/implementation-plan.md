@@ -4,6 +4,8 @@
 
 **Updated 21 November 2026, milestone 0** ([record](milestone-0-validation.md)): the bypass question settled (`enabled` declared); the C++ enum names port 16 `delete_` (a keyword) for the symbol `delete`; `t_nearest` ranges -1 to 64, since `nearest_keyframe()` can name the boundary after the last keyframe; the Reel LFO's descriptor is in `reel_lfo.cpp` with no header of its own; `save` stores no `reel#keyframes` key for an empty list (section 3: a missing key means no keyframes); `urid:map` is an optional feature (without it Reel runs and saves nothing).
 
+**Updated 21 November 2026, milestone 1** ([record](milestone-1-validation.md)): one vendored change after all (section 7: Bounce easing wrapped where its table falls, plus two reads past arrays); levels 0 and 1/65535 are silence (4.3); `t_nearest` is the 0-based index of the nearest keyframe, -1 to 63 (section 3); for a second after a restore, Level changes are the patch's loaded values, not edits (4.2: Ingen sets port values after it restores state); bypass keeps the trigger low and holds the first gains when it starts bypassed (4.6); `activate` keeps the keyframes (4.1); a button press shorter than a grid step is latched (4.2); the spec's silence and default questions settled as recommended.
+
 This plan says how to build Reel: code layout, ports, state, the VCAs, real-time rules, tests, milestones and records. Values that only use can settle are given a starting value and marked **tune**.
 
 ## 1. What Ingen's source changes
@@ -35,8 +37,8 @@ reel.lv2/
     manifest.ttl
     reel.ttl
     reel_lfo.ttl
-third_party/eurorack/        vendored at f4cfa769 by tools/vendor.sh, unchanged
-    README.md                upstream commits, file list, "no local changes"
+third_party/eurorack/        vendored at f4cfa769 by tools/vendor.sh, one patch (section 7)
+    README.md                upstream commits, file list, local changes
     frames/keyframer.{h,cc}, poly_lfo.{h,cc}, resources.{h,cc}, resources/lookup_tables.py
     stmlib/                  LICENSE, stmlib.h, utils/dsp.h
 src/
@@ -50,7 +52,8 @@ src/
     reel_lfo.hpp/.cpp        the second plugin
     exports.map
 tools/
-    vendor.sh                copies the listed upstream files at the pinned commit
+    vendor.sh                copies the listed upstream files at the pinned commit, applies patches/
+    patches/                 the local changes to vendored files (section 7)
     render.cpp               keyframes and a Frame sweep in, WAV of outputs and levels out
 tests/
     host.hpp/.cpp            in-process LV2 host with random slicing, state and an allocation hook (from Chamber and Loo-pi)
@@ -89,7 +92,7 @@ Port **symbols, URIs and state keys are permanent** once a patch has been saved 
 | 35 | `t_frame` | Frame now | control out | effective Frame, 0-1 |
 | 36 | `t_count` | Keyframes | control out | 0-64 |
 | 37 | `t_active` | Active keyframe | control out | index of the active keyframe (editing target), or -1 |
-| 38 | `t_nearest` | Nearest keyframe | control out | `Keyframer::nearest_keyframe()` at the effective Frame, -1 to 64 |
+| 38 | `t_nearest` | Nearest keyframe | control out | index of the keyframe nearest the effective Frame (ties to the left), -1 with none; -1 to 63. Upstream's `nearest_keyframe()` counts from 1 when Frame is nearer the next keyframe and can name the slot after the last, so the page is told the index (milestone 1) |
 | 39 | `t_step` | Step | control out | sequencer step, 0-63 |
 
 Reel's enumerations use upstream's numbers (`EasingCurve`), so the glue passes them through. Telemetry ports are read by Peepo's page only while it is open ([peepo-page.md](peepo-page.md)). The keyframe list itself (positions, ids, levels) is the open telemetry question: an atom output appended in milestone 2.
@@ -121,7 +124,7 @@ Restore rejects (and leaves the instance empty) a vector whose length is not a m
 
 ### 4.1 Instantiate, activate and the evaluation grid
 
-`instantiate` accepts any rate from 8 to 768 kHz and holds a `frames::Keyframer` by value. Because `Keyframer::Init` does nothing under `-DTEST`, `activate` does what the hardware's fresh `Init` does: easing Linear and response 0 for every channel (then overwritten by the ports), `Clear()`, and the saved keyframes put back if state was restored.
+`instantiate` accepts any rate from 8 to 768 kHz and holds a `frames::Keyframer` by value (cleared once in the constructor, since `Keyframer`'s own leaves it unset). Because `Keyframer::Init` does nothing under `-DTEST`, `activate` does what the hardware's fresh `Init` does: easing Linear and response 0 for every channel (then overwritten by the ports), `Clear()`, and the keyframes it held put back with their ids: `activate` restarts the sound, not the patch. A restored list still pending is taken at the first grid frame.
 
 The keyframer is evaluated on a grid: every 8 frames counted from `activate` (6 kHz at 48 kHz; the hardware refreshes at up to 32 kHz). At each grid frame:
 
@@ -137,8 +140,10 @@ Gains move linearly from the previous grid frame's to the new over the 8 frames.
 `editing.cpp` copies `ui.cc`, applied at grid frames:
 
 - **Active keyframe:** `FindNearestKeyframe(frame_knob, 2048)` where `frame_knob` is the `frame` control alone (unsmoothed, no CV), recomputed when it changes by at least 1/1024 (the hardware's ADC event step), and after Add, Delete, Clear all or a restore.
-- **Level edits:** a change of `ch_n` by at least 1/1024 from the last value seen sets the active keyframe's level `n`, or, with no active keyframe, `set_immediate(n)`. The first `run()` after instantiate or restore takes the port values as the baseline: they are not edits. With no keyframes, `set_immediate` follows the Level controls at every grid frame (`SyncWithPots`).
-- **Add**, on a rising edge: with no active keyframe, `AddKeyframe(frame_knob, levels)` with the four Level controls; otherwise nothing. Full at 64: nothing.
+- **Level edits:** a change of `ch_n` by at least 1/1024 from the last value seen sets the active keyframe's level `n`, or, with no active keyframe, `set_immediate(n)`. The first grid frame after `activate` or after a restore is taken takes the port values as the baseline: they are not edits. With no keyframes, `set_immediate` follows the Level controls at every grid frame (`SyncWithPots`).
+- **Loading a patch (found in milestone 1):** Ingen restores a block's state when it creates it, and sets the patch's port values afterwards, one event per port (`Parser.cpp`, `parse_graph`), while the block may already be running with default controls. Frame then arrives on a keyframe and the Level values arrive as moves, and would edit it (seen at 128 frames, 4 threads). So for 1 s (**tune**, `kLoadSeconds`) after a restored list is taken, Level changes update the baseline and edit nothing; Frame still selects the active keyframe and the buttons act. `activate` alone opens no such window.
+- **Buttons:** rising edges are read at every `run()` and latched until the next grid frame, so a press shorter than a grid step (a host slicing there) is not lost; a button already high at the first `run()` is not a press.
+- **Add**, on a rising edge: with no active keyframe, `AddKeyframe(frame_knob, levels)` with the four Level controls; otherwise nothing. Full at 64: nothing (Add can't place keyframes closer than 1/32, so 64 come only from state).
 - **Delete**, on a rising edge: `RemoveKeyframe` of the active keyframe; then `SyncWithPots`.
 - **Clear all**, on a rising edge: `Clear()`, `SyncWithPots`.
 - Every change to the list is published for `save` and telemetry (section 5).
@@ -152,15 +157,18 @@ The hidden gestures (five Adds, ten Deletes), the long-press edit modes, flash s
 - control voltage, linear: `v_lin = -(2/3) log10(max(x, 1/4096))`;
 - control voltage, exponential: `v_exp = 2.5 (1 - x)`;
 - `b = round(32767 (r / 255)^1.5) / 32768` (`lut_response_balance`);
-- gain = `10^(-1.5 (v_lin + b (v_exp - v_lin)))`, and 0 when `x` is 0 (spec, Levels; the hardware's floor is -72 to -75 dB).
+- gain = `10^(-1.5 (v_lin + b (v_exp - v_lin)))`, and 0 when the level is 0 or 1/65535 (spec, Levels; the hardware's floor is -72 to -75 dB). 1/65535 counts as 0 because `Keyframer::Easing` lands one code short of its target when it falls (an arithmetic right shift of a negative product), so a fade to 0 ends there until Frame reaches the keyframe; the step curve's second half stays there.
+- At response 0 the gain is `max(x, 1/4096)` directly. The gain is recomputed only when a channel's level or response changes.
 
 Out n = In n times the gain, interpolated per sample. Level out n = the gain. Mix = the sum of Out 1-4 times the Output gain (smoothed 10 ms). Non-finite input samples are zeroed per channel.
+
+Measured against the hardware's code path (`ConvertToDacCode`, its 12-bit code taken as volts through the 2164): responses 0.25, 0.5 and 0.75 within 0.04 dB from level 1/16 up; below that the hardware's `lut_vca_linear`, a 1025-point table from 1/4096, is coarse (0.12 dB).
 
 ### 4.4 Trigger and sequencer
 
 From `frames.cc`, at grid frames:
 
-- **Trigger:** if `position()` differs from the last grid frame's and the trigger is armed, start a 10 ms pulse and disarm; if `nearest_keyframe()` differs from the last grid frame's, arm. The order (position first, then nearest) is upstream's. The pulse length is counted in samples.
+- **Trigger:** if `position()` differs from the last grid frame's and the trigger is armed, start a 10 ms pulse and disarm; if `nearest_keyframe()` differs from the last grid frame's, arm. The order (position first, then nearest) is upstream's, and so is the start (both "last" values -2, disarmed; reset by `activate`). The pulse length is counted in samples. As upstream, adding the first keyframe can fire one pulse (the position goes from -1 to 0).
 - **Sequencer:** with `mode` on, the clock is `frame_cv` alone (not scaled by Frame CV amount): below 1/3 it arms, above 2/3 when armed it disarms and advances the step; the step wraps to 0 when it reaches the number of keyframes; Frame is that keyframe's position. With no keyframes, the levels are the immediate ones, as upstream. Peepo's gates (0 and 1) cross both thresholds. The step is kept across mode changes, as upstream.
 
 ### 4.5 Reel LFO
@@ -171,14 +179,14 @@ Rate: `rate + rate_cv`, clamped to [0, 1], times 65535, passed to `Render`. Upst
 
 ### 4.6 Bypass
 
-`enabled` off: every gain glides to unity over 10 ms (Out n = In n, Mix = the sum of the inputs times Output) and Level outs hold their last values; the keyframer keeps evaluating, so turning on again glides back to where Frame is. Exact passthrough when settled. Declared in milestone 0, built in milestone 1.
+`enabled` off: every gain glides linearly to unity over 10 ms (Out n = In n, Mix = the sum of the inputs times Output) and Level outs hold their last values; the keyframer keeps evaluating, so turning on again glides back to where Frame is. Exact passthrough when settled, and exactly the gains again 10 ms after turning on. The trigger keeps its state but its output stays low while off. A Reel that starts off holds its Level outs at the first gains it computes. Editing works while off. Declared in milestone 0, built in milestone 1.
 
 ## 5. Real-time rules and threads, checked
 
 - No allocation, lock or I/O in `run()` (the in-process host's allocation hook, on a new thread).
 - **The keyframer lives on the audio thread.** Only `run()` calls it.
-- **Save while running:** after every change to the list, `run()` copies it (at most 64 x 12 bytes) into a published snapshot under a sequence lock. `save` reads the snapshot, retries if the sequence changed, and serialises it. `run()` never waits.
-- **Restore:** `restore` parses and checks the state into a pending buffer, then publishes it with a release store; `run()` takes it at the next grid frame (acquire), rebuilds the list with `Clear()` and one `AddKeyframe` per saved keyframe, sets each saved id through `mutable_keyframe`, and recomputes the active keyframe. `Keyframer` has no setter for its id counter, so after a restore new ids continue from the number of keyframes; ids only pick colours (modulo 8), so a repeat is harmless and no vendored change is made for it. A restore that arrives while an older one is pending replaces it. Works whether or not Ingen calls `restore` during `run()`.
+- **Save while running:** after every change to the list, `run()` copies it (at most 64 x 12 bytes) into a published snapshot under a sequence lock. `save` reads the snapshot, retries if the sequence changed, and serialises it. `run()` never waits. The snapshot's words are atomics (relaxed sequence store, then release stores; acquire loads in the reader), so a read racing a write is defined behaviour and TSan-clean; a torn read is caught by the sequence.
+- **Restore:** `restore` parses and checks the state into a pending buffer, then publishes it with a release store; `run()` takes it at the next grid frame (acquire), rebuilds the list with `Clear()` and one `AddKeyframe` per saved keyframe, sets each saved id through `mutable_keyframe`, and recomputes the active keyframe. `Keyframer` has no setter for its id counter, so after a restore new ids continue from the number of keyframes; ids only pick colours (modulo 8), so a repeat is harmless and no vendored change is made for it. A restore that arrives while an older one is pending replaces it. Works whether or not Ingen calls `restore` during `run()`. The pending slot has four states (empty, busy, ready, taking): `restore` and `save` take it busy with a compare-and-swap and yield while `run()` copies it (they are not real-time); `run()` takes a ready slot only, never waits, and publishes the new list before it empties the slot, so a `save` in between finds one or the other. `save` saves a restored list `run()` has not taken yet. A malformed list, or a newer version, is rejected and hands over an empty list.
 - `Evaluate` is a binary search over at most 64 keyframes and four easings: no bulk work.
 - Outputs finite: gains are finite by construction; inputs are checked (4.3).
 
@@ -218,14 +226,22 @@ Reel crossfading two effects in a typical patch for 30 minutes, Frame on an enco
 
 ## 7. Changes to vendored files
 
-None. Under `-DTEST`, `Keyframer::Init`, `Save` and `Calibrate` touch no storage (the draft of this plan wanted them removed); the glue does `Init`'s defaults itself (4.1). `third_party/eurorack/README.md` says so. If a change is ever needed it goes in `tools/patches/`, applied by `tools/vendor.sh`, as Chamber's.
+Under `-DTEST`, `Keyframer::Init`, `Save` and `Calibrate` touch no storage (the draft of this plan wanted them removed); the glue does `Init`'s defaults itself (4.1). Changes go in `tools/patches/`, applied by `tools/vendor.sh`, as Chamber's, and are listed in `third_party/eurorack/README.md`.
+
+One since milestone 1, `tools/patches/keyframer-easing-bounds.patch`, found by `make test SAN=1`:
+
+- `Keyframer::Easing` interpolates its easing table with `((b - a) >> 1) * ((scale << 10) & 0xffff)`, a signed step times an unsigned fraction. Where the table falls, which only Bounce's does, the product turns unsigned and the shaped scale comes out 131072 too high; the next product overflows `int` (undefined behaviour). With wrapping arithmetic, as on the hardware, a Bounce fade jumps by up to half of full scale in its falling parts (0 to 0.75: half of full scale; 0 to 1 and 0 to 0.5: two codes). The fraction is cast to `int32_t`: the interpolation the code clearly means.
+- `Easing` read entry 1025 of a 1025-entry table at scale 65536 (Frame exactly on the right keyframe), with weight 0; it reads entry 1024.
+- `Evaluate` read `keyframes_[64]` past the 64th keyframe; it reads 0, as the cleared slots hold.
+
+The `easing` test fails on Bounce without the first change.
 
 ## 8. Milestones
 
 Each has an end check. "Done" means the offline tests pass on x86-64 and arm64, plus the stated host checks. Each milestone ends with a record (section 10).
 
 - **Milestone 0, scaffolding. Done 21 November 2026** (tag ready; see the [record](milestone-0-validation.md)). The spec's bypass question settled. `tools/vendor.sh`, Makefile, both descriptors, both `.ttl` files with the full port lists, `ports.hpp`, state stubs, `ttl_check`, `scaffold`, `allocation`. Four VCAs at the Level controls. **Done when** `make`, `make install DESTDIR=...`, `lv2info` and `lv2lint` are clean, only `lv2_descriptor` is exported, and both plugins load in jalv and in Ingen under WSL. Tag `v0.0.1`.
-- **Milestone 1, keyframes.** Editing, easing, response, Frame CV, trigger, bypass, state; `editing`, `easing`, `vca`, `trigger`, `state`, `slicing`, `bypass`, `instances`, `rt_timing`. Save and reload through jalv, Carla and Ingen. The spec's silence and default questions settled. Pi xrun check. Tag `v0.1.0`; Peepo adds its overlay entry and pinned build (generic page).
+- **Milestone 1, keyframes. Done offline 21 November 2026; the Pi check and Carla are to do** (see the [record](milestone-1-validation.md)). Editing, easing, response, Frame CV, trigger, bypass, state; `editing`, `easing`, `vca`, `trigger`, `state`, `slicing`, `bypass`, `instances`, `rt_timing`. Save and reload through jalv, Carla and Ingen. The spec's silence and default questions settled. Pi xrun check. Tag `v0.1.0`; Peepo adds its overlay entry and pinned build (generic page).
 - **Milestone 2, sequencer, LFO, telemetry, first page.** `sequencer`, `lfo`; the keyframe telemetry decided and appended. Peepo's Reel page, first version, from a mockup approved by the user before it is built. Tag `v0.2.0`.
 - **Milestone 3, the page.** Touch editing; moving keyframes if the user wants it (a `commands` input, appended); stomp bindings; listening on the Pi. `v0.2.x` or `v0.3.0`.
 

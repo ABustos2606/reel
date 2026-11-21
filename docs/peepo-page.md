@@ -1,6 +1,6 @@
 # The Reel page in Peepo
 
-**Written:** 20 October 2026. **Updated 20 November 2026:** the contract follows the plan's port list (indices, `t_active` and `t_nearest` told apart, `t_step`, the keyframe list as one atom output), and the layout is marked for re-approval. **Follows:** [design.md](design.md). **Status:** the layout below was **accepted by the user on 20 October 2026**. On 21 October Peepo's rule became that every page is built like a module page: actions as header pills (main one white and first), one scrolling list of 300 x 40 bars two per row, no bottom button rows, no new bars on the small screen. The drawing's bottom row of buttons does not follow that rule. **Before anything is built, a new mockup that keeps this layout's lanes and moves its buttons into the header goes to the user and is approved.** The look is Peepo's own (Peepo `docs/03-interface-and-controls.md`, "Visual style", and its black pill-header design).
+**Written:** 20 October 2026. **Updated 21 November 2026 (milestone 1):** `t_nearest` counts from 0; Level writes in the second after a patch loads are not edits. **Updated 20 November 2026:** the contract follows the plan's port list (indices, `t_active` and `t_nearest` told apart, `t_step`, the keyframe list as one atom output), and the layout is marked for re-approval. **Follows:** [design.md](design.md). **Status:** the layout below was **accepted by the user on 20 October 2026**. On 21 October Peepo's rule became that every page is built like a module page: actions as header pills (main one white and first), one scrolling list of 300 x 40 bars two per row, no bottom button rows, no new bars on the small screen. The drawing's bottom row of buttons does not follow that rule. **Before anything is built, a new mockup that keeps this layout's lanes and moves its buttons into the header goes to the user and is approved.** The look is Peepo's own (Peepo `docs/03-interface-and-controls.md`, "Visual style", and its black pill-header design).
 
 The page is Peepo code (LVGL, `src/ui/`), not an LV2 UI: Ingen runs plugins without their interfaces, and Peepo already draws its own pages for the Tuner, the Euclidean sequencer and Loo-pi. This document is the contract between the two repositories: what the page shows, and which ports it reads and writes. It follows Loo-pi's `docs/peepo-page.md`.
 
@@ -45,6 +45,10 @@ Port numbers are the plan's (section 3). Symbols are permanent once a patch is s
 
 Frame CV never selects the active keyframe: only `frame` does (`ui.cc`). The page shows the effective Frame (`t_frame`) as the cursor and the knob's own value where it differs.
 
+For a second after a patch loads (after Reel takes restored keyframes), Level writes are taken as the patch's values and edit no keyframe: Ingen sets the saved port values after the block is running, and they must not edit (plan, 4.2). The page has nothing to do about it; a user can't open the page and move a level that fast.
+
+Add, Delete and Clear all act on the rising edge, read at every `run()` and kept until the next 8-frame grid step, so a pulse of one period is always seen.
+
 ### What the page reads
 
 Watched only while the page is open, like the Tuner's `freq_out` and Loo-pi's loop ports:
@@ -54,7 +58,7 @@ Watched only while the page is open, like the Tuner's `freq_out` and Loo-pi's lo
 | `t_frame` (35) | the effective Frame (control plus CV, or the sequencer's step), 0-1 |
 | `t_count` (36) | number of keyframes, 0-64 |
 | `t_active` (37) | the active keyframe, the editing target, or -1 |
-| `t_nearest` (38) | upstream's `nearest_keyframe()` at the effective Frame, -1 to 64 (declared range); -1 with no keyframes. Upstream counts it from 1 when Frame is nearer the keyframe after it, so milestone 1 checks what the page should be told |
+| `t_nearest` (38) | the index of the keyframe nearest the effective Frame, counted from 0 (ties to the left), -1 to 63; -1 with no keyframes. Settled in milestone 1: upstream's `nearest_keyframe()` counts from 1 when Frame is nearer the keyframe after it, so it is not passed through |
 | `t_step` (39) | the sequencer's step |
 | `level_1` ... `level_4` (29-32) | current gains, 0-1 |
 | keyframe list | **Open, recommended:** one atom output, appended in milestone 2, carrying the whole list (position, id, four levels per keyframe) each time it changes and once when the page starts watching. 64 positions and 256 levels as control outputs would be 320 ports. Decide after checking what Peepo's Ingen adapter can watch |

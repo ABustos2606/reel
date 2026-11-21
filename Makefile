@@ -21,7 +21,7 @@ endif
 URIS := https://github.com/ABustos2606/reel\#reel https://github.com/ABustos2606/reel\#lfo
 BUNDLE := $(BUILD_DIR)/reel.lv2
 VENDOR := third_party/eurorack
-SOURCES := src/lv2_entry.cpp src/reel.cpp src/reel_lfo.cpp src/keyframe_state.cpp
+SOURCES := src/lv2_entry.cpp src/reel.cpp src/reel_lfo.cpp src/keyframe_state.cpp src/editing.cpp
 VENDOR_SOURCES := $(addprefix $(VENDOR)/frames/,keyframer.cc poly_lfo.cc resources.cc)
 OBJECTS := $(patsubst src/%.cpp,$(BUILD_DIR)/obj/%.o,$(SOURCES))
 VENDOR_OBJECTS := $(patsubst $(VENDOR)/%.cc,$(BUILD_DIR)/obj/vendor/%.o,$(VENDOR_SOURCES))
@@ -38,9 +38,9 @@ COMPILE_FLAGS = $(BASE_FLAGS) $(LV2_CFLAGS) -isystem $(VENDOR) -Wall -Wextra
 # Vendored code is kept as upstream wrote it; its warnings are not ours.
 VENDOR_FLAGS = $(BASE_FLAGS) -I$(VENDOR) -w
 TEST_LIBS = -ldl -pthread
-TESTS := test_scaffold
+TESTS := test_scaffold test_keyframes
 
-.PHONY: all install test test-hosts lint clean
+.PHONY: all install test test-timing test-hosts lint clean
 all: $(BUNDLE)/reel.so $(TTL_TARGETS)
 
 $(BUILD_DIR)/obj/%.o: src/%.cpp
@@ -60,16 +60,30 @@ $(BUNDLE)/%.ttl: reel.lv2/%.ttl
 	@mkdir -p "$(@D)"
 	install -m 644 $< $@
 
-# The state parser is linked in directly as well, to drive it without a host.
+# The state parser is linked in directly as well (with the Keyframer it
+# loads lists into), to drive it without a host.
 $(BUILD_DIR)/test_scaffold: tests/test_scaffold.cpp tests/host.cpp tests/host.hpp src/ports.hpp \
-		$(BUILD_DIR)/obj/keyframe_state.o
+		$(BUILD_DIR)/obj/keyframe_state.o $(VENDOR_OBJECTS)
 	@mkdir -p "$(@D)"
 	$(CXX) $(COMPILE_FLAGS) tests/test_scaffold.cpp tests/host.cpp $(BUILD_DIR)/obj/keyframe_state.o \
-		$(LDFLAGS) $(TEST_LIBS) -o $@
+		$(VENDOR_OBJECTS) $(LDFLAGS) $(TEST_LIBS) -o $@
+
+# The keyframe tests drive the vendored Keyframer directly too, to compare
+# the plugin with it.
+$(BUILD_DIR)/test_keyframes: tests/test_keyframes.cpp tests/host.cpp tests/host.hpp src/ports.hpp src/vca.hpp \
+		$(BUILD_DIR)/obj/keyframe_state.o $(VENDOR_OBJECTS)
+	@mkdir -p "$(@D)"
+	$(CXX) $(COMPILE_FLAGS) tests/test_keyframes.cpp tests/host.cpp $(BUILD_DIR)/obj/keyframe_state.o \
+		$(VENDOR_OBJECTS) $(LDFLAGS) $(TEST_LIBS) -o $@
 
 test: all $(addprefix $(BUILD_DIR)/,$(TESTS))
 	$(PYTHON) tests/ttl_check.py $(BUNDLE)
 	$(BUILD_DIR)/test_scaffold $(BUNDLE)/reel.so
+	$(BUILD_DIR)/test_keyframes $(BUNDLE)/reel.so
+
+# rt_timing: 10 simulated minutes of random controls, edits and saves.
+test-timing: all $(BUILD_DIR)/test_keyframes
+	$(BUILD_DIR)/test_keyframes $(BUNDLE)/reel.so --timing
 
 # jalv and Ingen with a private dummy JACK server; Ingen must be on PATH
 # (Peepo's tools/ingen-spike/env.sh sets it up).

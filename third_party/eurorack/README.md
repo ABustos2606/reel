@@ -19,4 +19,11 @@ Reel compiles these with `-DTEST`, as upstream's own desktop builds do. That com
 
 ## Local changes
 
-None. If one is ever needed it goes in `tools/patches/`, applied by `tools/vendor.sh`, and is listed here.
+Applied by `tools/vendor.sh` from `tools/patches/`; each changed line is marked `Reel:` in the file.
+
+- `keyframer-easing-bounds.patch` (milestone 1, 21 November 2026), `frames/keyframer.cc`:
+  - `Keyframer::Easing` multiplies the table step by the fraction `(scale << 10) & 0xffff`, an unsigned value. Where the table falls (only Bounce's does) the product turns unsigned and the shaped scale comes out 131072 too high; the next multiplication then overflows `int`, undefined behaviour. With wrapping arithmetic, as the hardware has, a Bounce fade between two levels jumps by up to half of full scale in its falling parts, unless the levels differ by about 1/2 or all of full scale. The fraction is now an `int32_t`.
+  - `Easing` read one entry past its 1025-entry table at scale 65536 (Frame exactly on the right keyframe), where the entry's weight is 0. It reads the last entry instead; the result is unchanged.
+  - `Evaluate` read `keyframes_[64]` past the 64th keyframe to find the nearest keyframe. It reads 0 there, as the cleared slots after the last keyframe hold.
+
+Without the patch, `make test SAN=1` reports all three and the `easing` test fails on Bounce.

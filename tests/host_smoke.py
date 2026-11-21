@@ -6,6 +6,7 @@ Needs jackd, jalv, Ingen, python3-jack-client and numpy. Never stops an
 existing engine or server. Logs are kept in build/host-smoke/.
 """
 import argparse
+import math
 import os
 from pathlib import Path
 import re
@@ -106,6 +107,30 @@ def near(value, expected, tolerance=0.03):
     return abs(value - expected) <= tolerance * max(abs(expected), 0.01)
 
 
+# Two keyframes added through the controls: Frame, then Levels 1-4.
+KEYFRAMES = [(0.2, (1.0, 0.5, 0.0, 0.25)), (0.8, (0.0, 0.25, 1.0, 0.75))]
+SETTLE = 0.15  # seconds: several 1024-frame periods
+
+
+def code(x):
+    return int(x * 65535 + 0.5)
+
+
+def vca_gain(level, response):
+    """src/vca.hpp: the gain for a Level (0-1) at a Response (0-1)."""
+    x = code(level) / 65535
+    if x < 1.5 / 65535:
+        return 0.0
+    r = int(response * 255 + 0.5)
+    balance = round(32767 * (r / 255) ** 1.5) / 32768
+    floored = max(x, 1 / 4096)
+    if balance == 0:
+        return floored
+    v_linear = -(2 / 3) * math.log10(floored)
+    v_exponential = 2.5 * (1 - x)
+    return 10 ** (-1.5 * (v_linear + balance * (v_exponential - v_linear)))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("bundle", type=Path)
@@ -123,6 +148,7 @@ def main():
     env["LV2_PATH"] = str(private_lv2) + ":" + env.get("LV2_PATH", "/usr/local/lib/lv2:/usr/lib/lv2")
     processes, logs = [], []
     probe = protocol = None
+    saved_patches = []
 
     def launch(name, command):
         log = (logdir / f"{name}.log").open("w")
@@ -237,10 +263,40 @@ def main():
             print(f"PASS Ingen: two Reels and a Reel LFO, {threads} threads; Out 2 at Level 0.5 {out_a:.3f}, "
                   f"the other's Mix {out_b:.3f} (tone {TONE}), Level out 2 {cv:.3f}", flush=True)
 
-            settings = {"frame": 0.3, "frame_cv_amount": -0.5, "ch_2": 0.5, "ch_3": 0, "easing_1": 3,
-                        "response_2": 0.4, "mode": 1, "output": -6, "enabled": 0}
+            # Keyframes through the controls, as a stomp or the page adds them:
+            # move Frame, set the four Levels, pulse Add.
+            for position, levels in KEYFRAMES:
+                protocol.set("reel", "frame", position)
+                time.sleep(SETTLE)
+                for n, level in enumerate(levels, 1):
+                    protocol.set("reel", f"ch_{n}", level)
+                time.sleep(SETTLE)
+                protocol.set("reel", "add", 1)
+                time.sleep(SETTLE)
+                protocol.set("reel", "add", 0)
+                time.sleep(SETTLE)
+            heard = []
+            for position, levels in KEYFRAMES:
+                protocol.set("reel", "frame", position)
+                time.sleep(SETTLE)
+                heard.append(listen(0.3)[2])
+                require(near(heard[-1], levels[1], 0.001),
+                        f"Ingen: Level out 2 {heard[-1]} at Frame {position}, keyframe level {levels[1]}")
+            print(f"PASS Ingen: two keyframes added through Frame, Level and Add; Level out 2 "
+                  f"{heard[0]:.3f} and {heard[1]:.3f} at them; {threads} threads", flush=True)
+
+            # Level 2 at 0.6 and 3 at 0 with Frame between the keyframes edit
+            # none; then Frame moves onto the second keyframe (Level 2 0.25)
+            # and the patch is saved so. A host that loaded the Level values
+            # as moves would edit that keyframe; the reload checks it didn't.
+            protocol.set("reel", "frame", 0.5)
+            time.sleep(SETTLE)
+            settings = {"ch_2": 0.6, "ch_3": 0, "frame_cv_amount": -0.5, "easing_1": 3,
+                        "response_2": 0.4, "mode": 1, "output": -6, "enabled": 0, "frame": 0.8}
             for symbol, value in settings.items():
                 protocol.set("reel", symbol, value)
+                time.sleep(0.03)
+            time.sleep(SETTLE)
             save_path = logdir / f"{server_name}-{threads}.ingen"
             protocol.request("Copy", f"patch:subject <ingen:/main> ; patch:destination <{save_path.as_uri()}>")
             protocol.request("Delete", "patch:subject <ingen:/main/reel>")
@@ -252,15 +308,71 @@ def main():
             saved = (save_path / "reel" / "state.ttl").read_text()
             require(re.search(r'<https://github.com/ABustos2606/reel#version> "1"\^\^xsd:int', saved),
                     "Reel's LV2 state (reel#version 1) is saved with the patch")
-            require("reel#keyframes" not in saved, "no keyframes saved: there are none")
+            require("reel#keyframes" in saved and all(str(code(p)) in saved for p, _ in KEYFRAMES),
+                    "the keyframes are saved with the patch")
+            require("reel#keyframes" not in (save_path / "reel2" / "state.ttl").read_text(),
+                    "the other Reel saves none")
             require(engine.poll() is None, "Ingen exited")
-            print(f"PASS Ingen: controls save and restore; LV2 state saved with the patch, which reloads; "
-                  f"{threads} threads",
+            print(f"PASS Ingen: controls and keyframes saved with the patch, which reloads; {threads} threads",
                   flush=True)
             protocol.close()
             protocol = None
             stop(engine)
             path.unlink(missing_ok=True)
+
+            # A fresh engine loads the saved patch: the keyframes come back,
+            # with the saved Response 2 (0.4) applied to them.
+            engine = launch(f"ingen-{threads}-reload", [args.ingen, "-e", "-f", "-s", server_name, "-n", client,
+                                                        "-S", str(path), "-E", "0", "-p", str(threads)])
+            wait_for(path.exists, "Ingen socket did not appear (reload)")
+            time.sleep(1)
+            require(engine.poll() is None, "Ingen failed during JACK activation (reload)")
+            protocol = Protocol(path, logdir / f"protocol-{threads}-reload.log")
+            protocol.put("ingen:/main/cv_out", "a lv2:OutputPort, lv2:CVPort")
+            protocol.request("Copy", f"patch:subject <{save_path.as_uri()}> ; patch:destination <ingen:/main/restored>")
+            protocol.connect("ingen:/main/restored/cv_out", "ingen:/main/cv_out")
+            wait_for(lambda: bool(probe.get_ports(f"{client}:cv_out")), "Ingen JACK outputs (reload)")
+            capture(f"{client}:cv_out", f"{client}:cv_out", f"{client}:cv_out")
+            protocol.set("restored/reel", "enabled", 1)
+            heard = []
+            for position, levels in KEYFRAMES:
+                protocol.set("restored/reel", "frame", position)
+                time.sleep(SETTLE)
+                heard.append(listen(0.3)[0])
+                expected = vca_gain(levels[1], 0.4)
+                require(near(heard[-1], expected, 0.002),
+                        f"reloaded: Level out 2 {heard[-1]} at Frame {position}, expected {expected}")
+            require(engine.poll() is None, "Ingen exited (reload)")
+            print(f"PASS Ingen: a fresh engine reloads the keyframes; Level out 2 {heard[0]:.4f} and "
+                  f"{heard[1]:.4f} at them (Response 0.4); {threads} threads", flush=True)
+            protocol.close()
+            protocol = None
+            stop(engine)
+            path.unlink(missing_ok=True)
+            saved_patches.append(save_path)
+
+        # jalv loads the block state Ingen saved (lilv state, as Ingen writes
+        # it). That holds Reel's LV2 state only (Ingen keeps the port values
+        # in main.ttl), so the controls are at their defaults, Response 0:
+        # Level out 2 is each keyframe's level 2 exactly. With no keyframes it
+        # would be the Level 2 control, 1.
+        jalv_state = saved_patches[0] / "reel"
+        host = launch("jalv-state", ["jalv", "-n", "reel_jalv_state", "-l", str(jalv_state), "-c", "frame=0.8", URI])
+        wait_for(lambda: bool(probe.get_ports("reel_jalv_state:level_2")), "jalv did not load the saved state")
+        time.sleep(0.5)
+        require(host.poll() is None, "jalv failed loading the saved state")
+        capture("reel_jalv_state:level_2", "reel_jalv_state:level_2", "reel_jalv_state:level_2")
+        heard = []
+        for position, levels in reversed(KEYFRAMES):
+            host.stdin.write(f"frame = {position}\n".encode())
+            host.stdin.flush()
+            time.sleep(SETTLE)
+            heard.append(listen(0.3)[0])
+            require(near(heard[-1], levels[1], 0.001),
+                    f"jalv: Level out 2 {heard[-1]} at Frame {position}, keyframe level {levels[1]}")
+        stop(host)
+        print(f"PASS jalv: loads the state Ingen saved; Level out 2 {heard[1]:.3f} and {heard[0]:.3f} at the two "
+              f"keyframes", flush=True)
     finally:
         if protocol:
             protocol.close()

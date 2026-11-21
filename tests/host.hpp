@@ -97,6 +97,8 @@ public:
     uint32_t port_count;
     uint64_t frame = 0;
     bool random_slices = true;
+    bool measure = false;
+    std::vector<double> run_times; // microseconds per period, when measuring
 
 private:
     bool is_signal(uint32_t p) const { return lfo ? reel::is_lfo_signal(p) : reel::is_signal(p); }

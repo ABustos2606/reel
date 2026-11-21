@@ -7,6 +7,7 @@
 #include <lv2/state/state.h>
 #include <lv2/urid/urid.h>
 
+#include <atomic>
 #include <cstdint>
 
 namespace reel {
@@ -58,5 +59,50 @@ LV2_State_Status save_keyframes(const StateKeys& keys, const KeyframeList& list,
 // list, is rejected and leaves `list` empty.
 LV2_State_Status restore_keyframes(const StateKeys& keys, LV2_State_Retrieve_Function retrieve, LV2_State_Handle handle,
                                    KeyframeList& list);
+
+// The keyframer's list as KeyframeList, and back: Clear(), one AddKeyframe
+// per keyframe, then each id through mutable_keyframe (plan, section 5).
+// Keyframer has no setter for its id counter, so new ids continue from the
+// number of keyframes; ids only pick colours, so a repeat is harmless.
+void copy_keyframes(const frames::Keyframer& keyframer, KeyframeList& list) noexcept;
+void load_keyframes(frames::Keyframer& keyframer, const KeyframeList& list) noexcept;
+
+// The list run() publishes after every change, for save (plan, section 5): a
+// sequence lock with a single writer, the audio thread, which never waits.
+// Readers on any thread retry while a write is under way. The words are
+// atomics so that a read racing a write is well defined; a torn read is
+// detected by the sequence and retried.
+class PublishedList {
+public:
+    void publish(const frames::Keyframer& keyframer) noexcept; // audio thread only
+    void read(KeyframeList& list) const noexcept;              // any thread
+
+private:
+    static constexpr uint32_t kWordsPerKeyframe = 3; // position|id, levels 1|2, levels 3|4
+    std::atomic<uint32_t> sequence_{0};
+    std::atomic<uint32_t> count_{0};
+    std::atomic<uint32_t> words_[kMaxKeyframes * kWordsPerKeyframe]{};
+};
+
+// A restored list waiting for run() to take it (plan, section 5). restore
+// puts it and returns; run() takes it at its next grid frame without waiting
+// (if the slot is busy it tries again at the next one). A list put while an
+// older one waits replaces it. put() and peek() are not real-time: they yield
+// while the audio thread is copying the slot.
+class PendingList {
+public:
+    void put(const KeyframeList& list) noexcept;  // restore
+    // The audio thread takes the list in two steps, so that a save in between
+    // never sees neither the pending nor the published list: take() copies it
+    // out, the caller publishes it, release() empties the slot.
+    bool take(KeyframeList& list) noexcept;
+    void release() noexcept;
+    bool peek(KeyframeList& list) noexcept; // save: a list restored but not yet taken
+
+private:
+    enum : uint32_t { kEmpty, kBusy, kReady, kTaking };
+    std::atomic<uint32_t> state_{kEmpty};
+    KeyframeList list_;
+};
 
 } // namespace reel

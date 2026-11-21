@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Alejandro Bustos
 #include "host.hpp"
 
+#include <chrono>
 #include <cstring>
 #include <dlfcn.h>
 #include <stdexcept>
@@ -109,13 +110,17 @@ void Instance::period()
 {
     for (uint32_t p = 0; p < port_count; ++p) { buffers_[p][block] = kGuard; }
     uint32_t offset = 0;
+    double duration = 0;
     while (offset < block) {
         rng_ ^= rng_ << 13; rng_ ^= rng_ >> 17; rng_ ^= rng_ << 5;
         const uint32_t count = random_slices ? std::min(1 + rng_ % 97, block - offset) : block;
         connect(offset);
+        const auto start = std::chrono::steady_clock::now();
         descriptor->run(handle, count);
+        duration += std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - start).count();
         offset += count;
     }
+    if (measure) { run_times.push_back(duration); }
     for (uint32_t p = 0; p < port_count; ++p) {
         if (buffers_[p][block] != kGuard) {
             throw std::runtime_error("write past the end of a period, port " + std::to_string(p));

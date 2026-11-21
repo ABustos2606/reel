@@ -3,9 +3,9 @@
 # Copyright (c) 2026 Alejandro Bustos
 #
 # Copy the upstream files Reel needs into third_party/eurorack/, at the pinned
-# commits, and apply Reel's local changes from tools/patches/ (there are none:
-# see third_party/eurorack/README.md). Run by hand (it needs network access);
-# the build never runs it.
+# commits, and apply Reel's local changes from tools/patches/ (one, for the
+# keyframer: see third_party/eurorack/README.md). Run by hand (it needs
+# network access); the build never runs it.
 # Usage: tools/vendor.sh [scratch-dir]
 set -eu
 

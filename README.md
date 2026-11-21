@@ -3,13 +3,14 @@
 An LV2 keyframe mixer and four-output LFO, written for Peepo and other LV2
 hosts. MIT licensed, Copyright (c) 2026 Alejandro Bustos.
 
-**Status, 21 November 2026: milestone 0, scaffolding.** Both plugins build,
-load in jalv and in Ingen, and declare every port they will have. Reel passes
-four audio inputs through four VCAs at the Level controls, with the mix, the
-level CV outputs and LV2 state (a version only, until keyframes exist).
-Keyframes, easing, response, the trigger and bypass come in milestone 1; the
-sequencer, Reel LFO's outputs and the Reel page in milestone 2. See
-[docs/milestone-0-validation.md](docs/milestone-0-validation.md).
+**Status, 21 November 2026: milestone 1, keyframes, built; the Pi check is
+to do.** Reel stores keyframes with Add, Delete and Clear all, edits them with
+the Level controls as the hardware's knobs do, morphs between them along six
+easing curves with the hardware's VCA response, fires its trigger as Frame
+passes them, bypasses to unity, and saves them with the patch (checked in
+jalv and in Ingen, saved, reloaded in a fresh engine). The sequencer, Reel
+LFO's outputs and the Reel page come in milestone 2. See
+[docs/milestone-1-validation.md](docs/milestone-1-validation.md).
 
 Reel stores up to 64 snapshots of four channel levels along a Frame axis.
 Moving Frame, by hand or by CV, morphs the levels from one snapshot to the
@@ -36,6 +37,8 @@ make install LV2DIR=/opt/peepo/lib/lv2     # where Peepo finds plugins
 make OPT="-O2 -mcpu=cortex-a76"            # native Pi build
 make test                                  # offline tests (needs python3-rdflib)
 make test SAN=1                            # the same under ASan and UBSan
+make test SAN=thread                       # under TSan (WSL: run under setarch -R)
+make test-timing                           # run() time over 10 simulated minutes
 make test-hosts                            # jalv and Ingen, private JACK server
 ```
 
@@ -52,5 +55,6 @@ in Peepo's repository.
 Reel's keyframer and LFO are the code of Frames, a eurorack module designed
 by Emilie Gillet, published under the MIT license at
 https://github.com/pichenettes/eurorack. The vendored files in
-`third_party/eurorack/` keep their copyright notices. Reel is not affiliated
+`third_party/eurorack/` keep their copyright notices; Reel's one change to them
+is listed in `third_party/eurorack/README.md`. Reel is not affiliated
 with or endorsed by Mutable Instruments, a registered trademark.

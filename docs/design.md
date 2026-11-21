@@ -2,7 +2,7 @@
 
 Reel is a keyframe mixer for Peepo, a pedal built on a Raspberry Pi 5 running the Ingen modular host. It stores up to 64 snapshots (keyframes) of four channel levels along a Frame axis; moving Frame, by hand or by CV, morphs the levels between them, with an easing curve per channel. The levels drive four VCAs and a mix, and come out as CV. Reel LFO, a second plugin in the bundle, is a four-output LFO with related shapes, phases and rates. It is an LV2 plugin made from the open-source code of Frames, a eurorack module by Emilie Gillet. Peepo shows Reel on a page of its own ([peepo-page.md](peepo-page.md)). It must also work as a normal LV2 plugin in Carla or Ardour, without that page.
 
-**Written:** 20 October 2026, from Peepo's `docs/38-eurorack-ports-roadmap.md` and a reading of Frames' source at `pichenettes/eurorack` commit `f4cfa7697095a28d292bff758beb51deb49b5a86` (12 October 2026). **Revised 20 November 2026** after reading every file Reel will use (`keyframer.*`, `poly_lfo.*`, `ui.*`, `frames.cc`, `drivers/dac.h`, `drivers/adc.h`, `drivers/system.cc`, `resources.h`, `resources/lookup_tables.py`) and Peepo's and Ingen's cable rules: how editing finds its keyframe, the step curve, the response curve and its floor, the trigger, the sequencer's clock, the LFO's controls and ranges, what flash storage does under `-DTEST`, and the audio-or-CV question were corrected or settled. **Status:** spec; milestone 0 built (21 November 2026). [implementation-plan.md](implementation-plan.md) says how to build it.
+**Written:** 20 October 2026, from Peepo's `docs/38-eurorack-ports-roadmap.md` and a reading of Frames' source at `pichenettes/eurorack` commit `f4cfa7697095a28d292bff758beb51deb49b5a86` (12 October 2026). **Revised 20 November 2026** after reading every file Reel will use (`keyframer.*`, `poly_lfo.*`, `ui.*`, `frames.cc`, `drivers/dac.h`, `drivers/adc.h`, `drivers/system.cc`, `resources.h`, `resources/lookup_tables.py`) and Peepo's and Ingen's cable rules: how editing finds its keyframe, the step curve, the response curve and its floor, the trigger, the sequencer's clock, the LFO's controls and ranges, what flash storage does under `-DTEST`, and the audio-or-CV question were corrected or settled. **Status:** spec; milestone 0 built (21 November 2026); milestone 1 built and checked offline and in jalv and Ingen (21 November 2026), the Pi check to do. [implementation-plan.md](implementation-plan.md) says how to build it.
 
 ## Why Frames
 
@@ -51,7 +51,7 @@ Up to 64 (`kMaxNumKeyframe`), kept sorted by position. Each holds a position, fo
 
 - **No keyframes:** the levels are the knobs' values (`set_immediate`).
 - **Before the first or after the last keyframe:** that keyframe's levels, held.
-- **Between two keyframes:** each channel goes from the left keyframe's level to the right one's along its **easing curve**: step, linear, in quartic, out quartic, in-out sine, bounce (`Easing`). Step jumps at the **midpoint** between the two keyframes, not at a keyframe.
+- **Between two keyframes:** each channel goes from the left keyframe's level to the right one's along its **easing curve**: step, linear, in quartic, out quartic, in-out sine, bounce (`Easing`). Step jumps at the **midpoint** between the two keyframes, not at a keyframe. `Easing` rounds a fall one code short of its target, so the step's second half, and a fade to 0, stop at 1/65535 until Frame reaches the keyframe. Upstream's bounce is broken where its curve falls: the interpolation turns unsigned and wraps, a jump of up to half of full scale on the hardware. Reel fixes it (plan, section 7).
 - It also gives the **interval** Frame is in (`position()`) and the **nearest keyframe** on either side (`nearest_keyframe()`), used by the trigger.
 
 ### Response
@@ -159,7 +159,7 @@ CV input: Rate CV (added to Rate; 1.0 is the whole range, as Frame CV). CV outpu
 
 ## Levels, floor and silence
 
-Reel copies the response curve in floating point, so level 1 is unity at every response and the in-between curves match the hardware's. At level 0 the hardware leaves -72 to -75 dB through. **Recommended:** level 0 is silence (the gain is forced to 0 there), because a crossfade on a pedal should end in silence; everything above 0 follows the hardware. **Open** (below).
+Reel copies the response curve in floating point, so level 1 is unity at every response and the in-between curves match the hardware's (within 0.04 dB from level 1/16 up). At level 0 the hardware leaves -72 to -75 dB through. **Settled (milestone 1), as recommended:** level 0 is silence (the gain is forced to 0 there), because a crossfade on a pedal should end in silence; everything above 0 follows the hardware. Level 1/65535 is silence too, since that is where the easing curves' fades to 0 stop (Keyframes, above).
 
 Peepo's CV convention is 1.0 = 5 V, and gates and triggers are high above 0.4. The Level out ports (0 to 1) match the hardware's 0 to 5 V normalled level. The trigger is 1.0 for **10 ms** (the hardware's 1 ms is shorter than a Peepo module reading CV once per period of 256 frames could see; **tune**).
 
@@ -167,7 +167,7 @@ Peepo's CV convention is 1.0 = 5 V, and gates and triggers are high above 0.4. T
 
 Every rule in "Editing" above is kept, with controls for knobs and buttons:
 
-- A **change** of a Level control is a knob move (it must differ from the last value Reel saw by at least 1/1024); a Level control that doesn't change does nothing. The values a patch loads with are not edits.
+- A **change** of a Level control is a knob move (it must differ from the last value Reel saw by at least 1/1024); a Level control that doesn't change does nothing. The values a patch loads with are not edits. Ingen sets them one by one after it has restored the keyframes and started the block, so for a second after the keyframes are restored a Level change is taken as a loaded value (milestone 1; plan, 4.2).
 - **Add**, **Delete**, **Clear all** act on their rising edge.
 - The active keyframe follows the **Frame control** only, as the hardware's knob; Frame CV never selects one for editing.
 - Because Level controls can't follow the active keyframe's values (plugins can't write their inputs), the page shows the keyframe's values from telemetry and writes the Level control when the user moves it.
@@ -180,7 +180,7 @@ On restore the keyframes come from state and the Level controls keep their saved
 
 ## Bypass
 
-Ingen's own block bypass never calls `run()`; it copies audio input *n* to audio output *n*: In 1-4 to Out 1-4 at unity, the Mix silent, the CV outputs silent. A patch that uses Mix goes silent when bypassed. **Settled (milestone 0):** an `lv2:enabled` port with `"bypass": "port"` in Peepo's overlay; off glides every gain to unity over 10 ms (Out n = In n, Mix = the sum of the inputs times Output), and holds the Level out ports.
+Ingen's own block bypass never calls `run()`; it copies audio input *n* to audio output *n*: In 1-4 to Out 1-4 at unity, the Mix silent, the CV outputs silent. A patch that uses Mix goes silent when bypassed. **Settled (milestone 0):** an `lv2:enabled` port with `"bypass": "port"` in Peepo's overlay; off glides every gain to unity over 10 ms (Out n = In n, Mix = the sum of the inputs times Output), holds the Level out ports and keeps the trigger low (built in milestone 1).
 
 ## The Peepo page
 
@@ -203,12 +203,17 @@ Settled in milestone 0 (21 November 2026):
 
 - **Bypass port**, as recommended: `enabled` (index 34, `lv2:enabled`), so Peepo's overlay can say `"bypass": "port"`. Off glides every gain to unity (section "Bypass"); built in milestone 1, inert until then.
 
+Settled in milestone 1 (21 November 2026), as recommended:
+
+- **Silence at level 0:** the gain is 0 at level 0 (and 1/65535), not the hardware's -72 dB.
+- **Level defaults:** 1, so a fresh Reel with no keyframes passes all four channels.
+- **The nearest keyframe for the page:** `t_nearest` is the index of the keyframe nearest the effective Frame, counted from 0, not upstream's `nearest_keyframe()` (which the trigger still uses).
+- **Bounce fixed:** upstream's wraps where its curve falls; Reel's doesn't (plan, section 7).
+
 ## Open questions
 
 | Question | Why it matters | Recommendation | Settle by |
 | --- | --- | --- | --- |
-| Silence at level 0 | The hardware leaves -72 dB through | Level 0 is silence | Milestone 1 |
-| Level defaults | A fresh Reel with no keyframes plays its Level controls | 1 (all channels pass) | Milestone 1 |
 | Knobs editing a keyframe | Moving Frame onto a keyframe and then touching a level edits it; that can surprise | Keep the rule; the page highlights the active keyframe | Milestone 2, with the page |
 | Telemetry of the keyframes | The page needs 64 positions and 256 levels | One atom output, sent when the list changes | Milestone 2 |
 | Moving a keyframe | The hardware can't; the page could | A `commands` atom input, as Loo-pi's | Milestone 3 |
@@ -217,6 +222,6 @@ Settled in milestone 0 (21 November 2026):
 ## Milestones
 
 - [x] Milestone 0 (21 November 2026, [record](milestone-0-validation.md)): vendored code, Makefile, LV2 glue and both `.ttl` files with the full port lists, state stubs. Reel passes audio through four VCAs at the Level controls. Loads in jalv and in Ingen under WSL. Tag `v0.0.1`.
-- [ ] Milestone 1: keyframes: Add, Delete, Clear all, editing, easing, response, Frame CV, the trigger, LV2 state saved and restored (jalv, Carla, Ingen). Pi xrun check. Tag `v0.1.0`.
+- [ ] Milestone 1: keyframes: Add, Delete, Clear all, editing, easing, response, Frame CV, the trigger, LV2 state saved and restored (jalv, Carla, Ingen). Pi xrun check. Tag `v0.1.0`. *Built 21 November 2026 ([record](milestone-1-validation.md)): offline tests on x86-64 and arm64, jalv and Ingen pass; Carla and the Pi check are to do.*
 - [ ] Milestone 2: the sequencer, Reel LFO, telemetry; Peepo's Reel page, first version, from an approved mockup. Tag `v0.2.0`.
 - [ ] Milestone 3: the page complete (touch editing, moving keyframes if wanted), stomp bindings, listening on the Pi.

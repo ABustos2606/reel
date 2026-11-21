@@ -157,7 +157,8 @@ def check_host_defaults(defaults, name):
 def check_fallbacks(defaults):
     """The C++ fallbacks for an unconnected or non-finite control agree with the Turtle."""
     glue = (ROOT / "src/reel.cpp").read_text(encoding="utf-8")
-    fallbacks = {s: float(v) for s, v in re.findall(r"control\(Port::(\w+), (-?[0-9.]+)f,", glue)}
+    # Port::delete_ is the C++ name of the symbol delete.
+    fallbacks = {s.rstrip("_"): float(v) for s, v in re.findall(r"control\(Port::(\w+), (-?[0-9.]+)f,", glue)}
     # The four Level controls share one call: control(nth(Port::ch_1, c), ...).
     for s, v in re.findall(r"control\(nth\(Port::(\w+)_1, c\), (-?[0-9.]+)f,", glue):
         fallbacks.update({f"{s}_{n}": float(v) for n in range(1, 5)})
