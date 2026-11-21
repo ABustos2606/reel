@@ -154,8 +154,11 @@ Audio: In 1-4, Out 1-4 (input times gain), Mix. CV input: Frame CV. CV outputs: 
 | Shape spread | 0 to 1, centre 0.5 | |
 | Spread | 0 to 1, centre 0.5 | Above: phase; below: each next output faster |
 | Coupling | 0 to 1, centre 0.5 | |
+| BPM | 30 to 300, default 120 | Peepo sets it from the patch tempo (overlay `"tempo": "bpm"`), as for its other tempo modules |
+| Tempo sync | on or off, default off | On: a cycle lasts Note at BPM; Rate is ignored, Rate CV still adds |
+| Note | 8 bars, 4 bars, 2 bars, 1 bar, 1/2, 1/4, 1/8, 1/16; default 1 bar | Free-running at that rate: Peepo has no transport, so the phase is not aligned to the beat |
 
-CV input: Rate CV (added to Rate; 1.0 is the whole range, as Frame CV; the sum is clamped to Rate's range). CV outputs: Out 1-4, the hardware's VCA gain at the LFO's DAC codes, 1/4096 to 1. **Open:** a BPM port for the patch tempo.
+CV input: Rate CV (added to Rate; 1.0 is the whole range, as Frame CV; the sum is clamped to Rate's range). CV outputs: Out 1-4, the hardware's VCA gain at the LFO's DAC codes, 1/4096 to 1.
 
 ## Levels, floor and silence
 
@@ -215,6 +218,8 @@ Settled in milestone 2 (21 November 2026):
 - **Telemetry of the keyframes,** as recommended: one atom output, `t_keyframes` (index 40, appended), sent when the list changes (at most 25 times a second) and every 0.5 s. The list is one string, `1:` then 24 hex digits per keyframe, because Ingen hands a watched atom output's events to its clients as Turtle literals and Peepo reads literals, not RDF lists (plan, 4.7). Checked through WSL's Ingen.
 - **Reel LFO's outputs** are the hardware's: the VCA's gain at `PolyLfo`'s DAC codes at linear response, 1/4096 to 1.
 - **Spread below its centre** speeds each next LFO up (measured; the spec said it slowed them).
+- **A BPM for Reel LFO** (asked; the user chose "like other modules do"): `bpm`, `sync` and `note` appended (indices 10-12); Peepo sets `bpm` from the patch tempo.
+- **The page:** the mockup approved as drawn; encoders as on every module page (E1 picks a bar, E2 turns it; Frame is a bar).
 
 ## Open questions
 
@@ -222,7 +227,6 @@ Settled in milestone 2 (21 November 2026):
 | --- | --- | --- | --- |
 | Knobs editing a keyframe | Moving Frame onto a keyframe and then touching a level edits it; that can surprise | Keep the rule; the page highlights the active keyframe | Milestone 2, with the page |
 | Moving a keyframe | The hardware can't; the page could | A `commands` atom input, as Loo-pi's | Milestone 3 |
-| BPM for Reel LFO | Patch tempo | Not in `v0.2.0`. Peepo's convention is a BPM control of the module's own, named in its overlay entry (`"tempo": "<symbol>"`) and set from the patch tempo (Peepo `docs/29-parameters-files-tempo.md`): appended `bpm` and `sync` (Rate as a note length when on) controls would follow it. Asked in milestone 2 | Milestone 3 |
 
 ## Milestones
 

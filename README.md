@@ -3,15 +3,16 @@
 An LV2 keyframe mixer and four-output LFO, written for Peepo and other LV2
 hosts. MIT licensed, Copyright (c) 2026 Alejandro Bustos.
 
-**Status, 21 November 2026: milestone 2's plugin side built; the Reel page
-waits for its mockup's approval, and the Pi checks are to do.** Reel stores
+**Status, 21 November 2026: milestone 2 built; Peepo's Reel page is built
+from the approved mockup; the Pi checks are to do.** Reel stores
 keyframes with Add, Delete and Clear all, edits them with the Level controls
 as the hardware's knobs do, morphs between them along six easing curves with
 the hardware's VCA response, fires its trigger as Frame passes them, bypasses
 to unity, and saves them with the patch. Its Sequencer mode steps through the
 keyframes on each Frame CV clock. It sends the keyframe list to Peepo's page
 on an atom output, checked through Ingen. Reel LFO's four outputs run, equal
-to the hardware's LFO code driven at its own 24 kHz. See
+to the hardware's LFO code driven at its own 24 kHz, and can follow the patch
+tempo. See
 [docs/milestone-2-validation.md](docs/milestone-2-validation.md) and
 [docs/milestone-1-validation.md](docs/milestone-1-validation.md).
 
