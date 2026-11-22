@@ -3,8 +3,8 @@
 An LV2 keyframe mixer and four-output LFO, written for Peepo and other LV2
 hosts. MIT licensed, Copyright (c) 2026 Alejandro Bustos.
 
-**Status, 21 November 2026: milestone 2 built; Peepo's Reel page is built
-from the approved mockup; the Pi checks are to do.** Reel stores
+**Status, 22 November 2026: milestone 2 done; Peepo's Reel page is built
+from the approved mockup; on the Pi, 30 minutes without an xrun.** Reel stores
 keyframes with Add, Delete and Clear all, edits them with the Level controls
 as the hardware's knobs do, morphs between them along six easing curves with
 the hardware's VCA response, fires its trigger as Frame passes them, bypasses

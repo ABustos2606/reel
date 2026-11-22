@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: MIT -->
 # Milestone 2 validation
 
-**Reel side done offline and in jalv and Ingen; the Reel page approved and built in Peepo (checked in its tests); the Pi checks are to do (the Pi was off the network).** Recorded 21 November 2026. Reel's Sequencer mode is built: Frame CV clocks it through the keyframes, as `frames.cc` does. Reel LFO's four outputs run: the vendored `PolyLfo` driven at its tables' own 24 kHz, its DAC codes taken through the hardware's VCA. The keyframe telemetry is settled and appended as port 40, `t_keyframes`: the list as one string on an atom output, sent when it changes and every half second. The checks cover the sequencer's clock against upstream's thresholds, Reel LFO against `PolyLfo` driven directly at four host rates, the telemetry's text, timing and slicing, and, in WSL's Ingen, that a client watching `t_keyframes` receives the list. Also covered: threads (TSan), ASan and UBSan, slicing, allocation, x86-64 and arm64. Not covered: Carla (not installed) and the Pi. The page mockup (`docs/images/mockup-reel-*.png`) was approved as drawn and built in Peepo the same day. At the user's request Reel LFO also got a BPM control that Peepo sets from the patch tempo, with Tempo sync and Note (ports 10-12, appended).
+**Done: offline, in jalv and Ingen, on the Pi (30 minutes, 0 xruns; the keyframes back after a reboot); the Reel page approved and built in Peepo (checked in its tests).** Recorded 21 November 2026; the Pi checks 21-22 November. Reel's Sequencer mode is built: Frame CV clocks it through the keyframes, as `frames.cc` does. Reel LFO's four outputs run: the vendored `PolyLfo` driven at its tables' own 24 kHz, its DAC codes taken through the hardware's VCA. The keyframe telemetry is settled and appended as port 40, `t_keyframes`: the list as one string on an atom output, sent when it changes and every half second. The checks cover the sequencer's clock against upstream's thresholds, Reel LFO against `PolyLfo` driven directly at four host rates, the telemetry's text, timing and slicing, and, in WSL's Ingen, that a client watching `t_keyframes` receives the list. Also covered: threads (TSan), ASan and UBSan, slicing, allocation, x86-64 and arm64. Not covered: Carla (not installed), and the page on the Pi (its installed interface predates the page). The page mockup (`docs/images/mockup-reel-*.png`) was approved as drawn and built in Peepo the same day. At the user's request Reel LFO also got a BPM control that Peepo sets from the patch tempo, with Tempo sync and Note (ports 10-12, appended).
 
 | Check | Result |
 | --- | --- |
@@ -18,7 +18,11 @@
 | `make test-hosts`, Peepo's Ingen, 1 and 4 threads, 1024- and 128-frame periods | Milestone 1's checks pass unchanged (two keyframes added through the controls; saved; a fresh engine reloads them; Level out 2 0.1999 and 0.0690 at Response 0.4). **Telemetry:** a client that sets `ingen:broadcast` true on `ingen:/main/reel/t_keyframes` gets `patch:property ingen:activity ; patch:value "1:3333...bfff"`, 50 characters, whose positions and levels are the two keyframes'. The saved Mode (Sequencer) restores; the reload sets it back to Keyframes before checking levels |
 | jalv, the state Ingen saved | As milestone 1: Level out 2 0.500 and 0.250 at the two keyframes |
 | Carla | **Not done**: not installed in WSL, and Debian 13 has no `carla` package |
-| **Pi 5: xruns, DSP load, RSS, keyframes after a reboot** | **Not done** (milestone 1's check, now with Reel LFO in the patch; below) |
+| Pi 5, `make -j3 OPT="-O2 -mcpu=cortex-a76"` and `make test`, native arm64 (Debian 12, GCC 12.2) | No warnings; PASS, 28 checks |
+| Pi 5, `make test-timing`, 48 kHz, 128 frames, 10 simulated minutes | Reel: mean 6.1 us (0.23% load), 99.9% 35 us, worst 94 us. Reel LFO: mean 12.9 us (0.49%), 99.9% 24 us, worst 74 us |
+| **Pi 5: xruns, DSP load, RSS** (`tools/pi_check.py`, 48 kHz, 128 frames, 30 minutes) | **0 xruns**; JACK DSP load 4.4% mean, 9.2% max (the same patch without Reel and Reel LFO, 5 minutes: 2.5%, 2.8%); engine RSS 144.6 -> 150.8 MB (it grows without Reel too); 29 saves; power flags 0x0, 49-55 C |
+| **Pi 5: keyframes after a reboot** (`tools/reboot_check.py`) | **PASS**: the bundle saved during the run, loaded into the engine after a reboot, gives the same three keyframes on `t_keyframes` |
+| Peepo catalogue on the Pi | Overlay and inventory differed from Peepo's only by Reel's lines; re-exported: 256 -> 258 modules, only Reel (19 controls, 16 ports) and Reel LFO (8 controls, 5 ports) added. Peepo's `docs/evidence/catalogue-pi-20261121-reel.json` |
 | **Peepo's Reel page** | Built in Peepo from the approved mockup: `ingen_tests` (`reel_monitor`: the list taken from `ingen:activity` as Ingen sends it, control outputs read, a malformed list ignored, subscriptions dropped on leaving, the patch never marked modified) and `ui_check` (captures `99-reel-on-keyframe`, `-between`, `-clear`, `-sequencer`: the editing target named, Level bars showing its levels, Add pulsed 1 then 0, a tap near a keyframe landing on it exactly, Clear all asking in the header, the sequencer's step in the footer) pass on Windows |
 
 ## What the offline tests cover
@@ -49,14 +53,16 @@ Recorded in the spec (Decisions, 21 November 2026). The keyframe telemetry is on
 
 `docs/images/mockup-reel-1-on-keyframe.png` to `-5-clear.png`, rendered from `tools/mockup/reel-page.html` by `tools/mockup/render.sh` (headless Chrome, 800 x 480). It shows Frame on a keyframe, Frame between keyframes, the curves, Sequencer mode and Clear all's confirmation. The layout is described in [peepo-page.md](peepo-page.md).
 
-## Pi check (to do)
+## Pi check
 
-Approved by the user. `tools/pi_check.py` (modelled on Slope's) builds the patch on the Pi's running engine: Overdrive and a delay from IN, crossfaded by Reel into Mist, Reel LFO on the delay's feedback and Mist's density, three keyframes added through the controls and read back from `t_keyframes`. For 30 minutes Frame moves as an encoder would, then Reel LFO drives Frame CV, and the graph is saved every minute; then 5 minutes of the same patch without Reel. Then a reboot, to see the keyframes come back. **Not run:** when it was due the Pi did not answer (no mDNS name, its last address timed out, and a sweep of the LAN found only the router and the PC).
+Run on 21-22 November 2026 (Peepo's `docs/evidence/reel-pi-20261121.txt` has the logs). Reel `d2af563` (the plugin code of `0089184`) built and installed on the Pi; the engine, routing and interface restarted with "Clouds guitar". `tools/pi_check.py` (modelled on Slope's) built the patch on the running engine: Overdrive and a delay from IN into Reel's inputs 1 and 2, Reel's mix into Mist, Reel LFO on the delay's feedback and Mist's density. Three keyframes were added through the controls as the page adds them (0.1 all Overdrive, 0.5 both at 0.6, 0.9 all delay) and read back from `t_keyframes`. For 15 minutes Frame moved every 200 ms as an encoder would, then Reel LFO's Out 1 drove Frame CV for 15 more; the graph was saved every minute (29 saves, Reel's state in `reel/state.ttl` each time). Then 5 minutes of the same patch without Reel and Reel LFO, and "Clouds guitar" reloaded. Results in the table above: no xruns, and Reel and Reel LFO add about 2 points of DSP load. The highest load, 9.2% (JACK's load sampled every 5 seconds), came after Reel LFO took over Frame; the mean stayed at 4.3%.
+
+Then the reboot: the last saved bundle, kept on the card, was loaded into the freshly booted engine by `tools/reboot_check.py` as Peepo loads a patch (the running blocks removed, then `patch:Copy` of the bundle into `ingen:/main`), and Reel listed the same three keyframes. "Clouds guitar" was reloaded afterwards, unmodified.
 
 ## Not in this milestone
 
-Peepo's pinned build (waits for this milestone's commit to be pushed), the catalogue export on the Pi, `tools/render`, Carla, the Pi.
+`tools/render`, Carla, the Reel page on the Pi (it comes with Peepo's next interface install). Peepo's build is pinned at `0089184` and moves to `v0.2.0` once tagged.
 
 ## Release
 
-`v0.2.0` (Turtle `lv2:minorVersion 2`, `lv2:microVersion 0`, both plugins) is ready to tag on the commit that adds this record, once the page and the Pi checks pass; nothing is committed, tagged or pushed.
+`v0.2.0` (Turtle `lv2:minorVersion 2`, `lv2:microVersion 0`, both plugins) is ready to tag on the commit that adds this record: the page and the Pi checks pass. Nothing is committed, tagged or pushed.
