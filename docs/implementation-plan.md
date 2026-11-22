@@ -8,6 +8,8 @@
 
 **Updated 21 November 2026, milestone 2** ([record](milestone-2-validation.md)): the keyframe telemetry settled and appended as port 40, `t_keyframes`, an atom output carrying the list as one string (section 3, 4.7: Ingen forwards a watched atom output's events as `ingen:activity` literals, and Peepo's reader takes literals, not RDF lists); `lv2:minorVersion` 2 on both plugins; the sequencer (4.4) and Reel LFO (4.5) built; Reel LFO's outputs are the hardware's VCA gain at `PolyLfo`'s DAC codes, 1/4096 to 1; below its centre Spread makes each next output faster, not slower (an octave each at 0); vendored code is compiled with `-fwrapv` (section 7: two of stmlib's interpolations overflow `int` in an intermediate product, harmlessly when wrapped); the page mockup drawn for approval (`docs/images/mockup-reel-*.png`), approved as drawn; Reel LFO's `bpm`, `sync` and `note` appended (indices 10-12) so Peepo can set its tempo.
 
+**Updated 22 November 2026, milestone 3** ([record](milestone-3-validation.md)): the page can move a keyframe, as the user chose: port 41, `commands`, an atom input taking one `xsd:int` per move (section 3, 4.8). A move keeps the keyframe between its neighbours and 1/32 from them. Ingen hands every slice of a period the same input sequence, and it saves the last value set on the port with the patch and sets it again on load. So a move is absolute and safe to apply twice, a sequence already read is skipped, moves are ignored in the load second (as Level changes are), and the page sends 0 when a drag ends. `lv2:minorVersion` 3 on both plugins. Peepo's side: dragging a lane up or down at the editing target sets that level, dragging a keyframe's tag moves it, and stomps step Frame to the next or previous keyframe.
+
 This plan says how to build Reel: code layout, ports, state, the VCAs, real-time rules, tests, milestones and records. Values that only use can settle are given a starting value and marked **tune**.
 
 ## 1. What Ingen's source changes
@@ -51,6 +53,7 @@ src/
     vca.hpp                  the response curve in floating point, smoothed gains, mix
     trigger.hpp              the trigger's arming and pulse (from frames.cc)
     telemetry.hpp            the keyframe list for the page, on t_keyframes (4.7)
+    commands.hpp             the page's moves, on commands (4.8)
     keyframe_state.hpp/.cpp  LV2 state: serialise, restore, handover (section 5)
     reel_lfo.cpp             the second plugin (no header of its own)
     exports.map
@@ -99,6 +102,7 @@ Port **symbols, URIs and state keys are permanent** once a patch has been saved 
 | 38 | `t_nearest` | Nearest keyframe | control out | index of the keyframe nearest the effective Frame (ties to the left), -1 with none; -1 to 63. Upstream's `nearest_keyframe()` counts from 1 when Frame is nearer the next keyframe and can name the slot after the last, so the page is told the index (milestone 1) |
 | 39 | `t_step` | Step | control out | sequencer step, 0-63 |
 | 40 | `t_keyframes` | Keyframe list | atom out (`atom:Sequence` of `atom:String`, `rsz:minimumSize` 4096) | the keyframe list as text, for the page (4.7); appended in milestone 2 |
+| 41 | `commands` | Commands | atom in (`atom:Sequence` of `atom:Int`, `rsz:minimumSize` 4096) | edits from the page: move a keyframe (4.8); appended in milestone 3 |
 
 Reel's enumerations use upstream's numbers (`EasingCurve`), so the glue passes them through. Telemetry ports are read by Peepo's page only while it is open ([peepo-page.md](peepo-page.md)). The keyframe list itself (positions, ids, levels) goes out on `t_keyframes` (settled in milestone 2, 4.7): 320 control outputs would be needed otherwise, and Ingen sends every watched control output 25 times a second (Loo-pi's measurement).
 
@@ -199,6 +203,17 @@ The page needs every keyframe's position, id and four levels (up to 64 x 6 numbe
 - **Slices:** Ingen prepares an output sequence once per period (an `atom:Chunk` of its capacity) and runs every slice on the same buffer (`PortImpl::pre_process`), so a sequence already in the buffer was written earlier in this period and is kept; a newer list replaces it. A host that prepares the buffer before every `run()` (jalv) works too. Without `urid:map` nothing is written.
 - Writing the text is at most 1.5 KB of formatting at 25 Hz: no allocation, no lock.
 
+### 4.8 Moving keyframes (milestone 3)
+
+The hardware can't move a keyframe; the page can, through `commands` (41), an `atom:Sequence` input of `atom:Int` events (`src/commands.hpp`). Peepo sets the port to a typed `xsd:int`, which Ingen's Sratom reader turns into an `atom:Int` event in the next block (`SetPortValue`), as for Loo-pi's `commands`.
+
+- **Value:** `op << 24 | keyframe << 16 | position`. Op 0 does nothing. Op 1 moves keyframe `keyframe` (0-63, in position order, as `t_keyframes` lists them) to `position` (0-65535). Other ops, negative values, a keyframe that doesn't exist and events that are not `atom:Int` are ignored.
+- **The move** (`Editor::move`): the keyframe keeps its id and levels and stays between its neighbours, at least 1/32 (2048) from each, as Add leaves keyframes; the ends are 0 and 65535. So the order never changes and `Evaluate` never divides by zero. A keyframe already nearer a neighbour than that (only state can give one) doesn't move. Afterwards the active keyframe is looked up again from the Frame control. The list is published for save and the page (section 5). Moving a keyframe across Frame can fire the trigger, as Frame passing it would.
+- **When:** the moves of a `run()` are queued (16 at most; a full queue keeps the newest in its last slot) and applied at the next grid frame, before that grid frame's button presses: the page numbered the keyframes before them.
+- **Slices:** Ingen connects an atom input to the same buffer for every slice of a period, with event times counted from the period's start (`Buffer::port_data` ignores the offset). A move is absolute, so applying it twice changes nothing; still, a sequence byte for byte identical to the last `run()`'s, in the same buffer, is skipped as already read, so a press in a later slice of the same period can't renumber the keyframes under a repeated move. An empty sequence resets this, so a later identical move is read.
+- **Loading a patch:** Ingen keeps the last value set on an input port as its `ingen:value`, saves it with the patch and sets it again when it loads (`Serialiser`, `Delta`; checked in `make test-hosts`). So moves are ignored for the second after a restored list is taken (`kLoadSeconds`, as Level changes, 4.2), and the page sends 0 when a drag ends, so the saved value does nothing.
+- Without `urid:map` commands are not read.
+
 ## 5. Real-time rules and threads, checked
 
 - No allocation, lock or I/O in `run()` (the in-process host's allocation hook, on a new thread).
@@ -222,8 +237,9 @@ The page needs every keyframe's position, id and four levels (up to 64 x 6 numbe
 | `trigger` | one pulse each time Frame passes a keyframe, none while it wobbles inside one interval, none with no keyframes; 10 ms |
 | `sequencer` | each Frame CV rise above 2/3 after a fall below 1/3 advances one keyframe and wraps; Frame and Frame CV amount ignored; levels exact |
 | `state` | save, restore into a fresh instance: identical levels at 1000 positions, same ids; restore while running; malformed, oversized and unsorted vectors rejected; missing keys; thousands of saves on one thread while another edits (`SAN=thread`) |
-| `slicing` | the same outputs for whole periods, random slices and a 37-frame period, with Frame, edits and Frame CV moving |
+| `slicing` | the same outputs for whole periods, random slices and a 37-frame period, with Frame, edits, moves and Frame CV moving |
 | `lfo` | Reel LFO's four outputs equal `PolyLfo` driven directly at 24 kHz, sampled at the host rate; rate 0 and 1 give 0.0134 and 110 Hz within 0.5%; out-of-range Rate CV clamped; below its centre Spread speeds up each next output; `activate` restarts the phases; with Tempo sync, a cycle lasts the Note at the BPM within 0.5% (1/4 at 120, 1 bar at 90, 1/16 at 300, 8 bars at 30), Rate ignored, Rate CV adds |
+| `commands` | a move keeps the keyframe's id and levels and reaches `t_keyframes` within 40 ms; it stops 1/32 from its neighbours and at 0 and 1; malformed commands, other ops and missing keyframes do nothing; levels as if the keyframes had been added there; the editing target and the sequencer's step follow; ignored for a second after a restore; buffers per period (Ingen) and per `run()` (jalv) |
 | `telemetry` | `t_keyframes`: the empty list at the first `run()`; a change within 40 ms; at most 25 lists a second while a Level is dragged; every 0.5 s unchanged; the text decodes to the saved list (positions, ids, levels); buffers prepared per period (Ingen) or per `run()` (jalv); 64 keyframes; nothing without `urid:map` |
 | `bypass` | `enabled` off reaches unity in 10 ms with Mix the sum of the inputs; on returns exactly |
 | `allocation`, `instances` | no `malloc` or `calloc` in `run()` on a new thread; two instances keep their own keyframes, on two threads |
@@ -237,7 +253,7 @@ Every test also runs under `SAN=1`, `SAN=thread`, and as an arm64 build under QE
 
 ### 6.3 Ingen under WSL
 
-`make test-hosts` with Peepo's engine (`tools/ingen-spike/env.sh`): add keyframes through the controls, save the patch (`patch:Copy`), reload in a fresh engine: keyframes and controls come back, levels identical. One and four threads, 1024- and 128-frame periods. Audio through the four VCAs from a test signal.
+`make test-hosts` with Peepo's engine (`tools/ingen-spike/env.sh`): add keyframes through the controls, move one through `commands` as Peepo does and back, then 0, save the patch (`patch:Copy`; `commands` saved as 0), reload in a fresh engine: keyframes and controls come back, levels identical. One and four threads, 1024- and 128-frame periods. Audio through the four VCAs from a test signal.
 
 ### 6.4 On the Pi
 
@@ -264,7 +280,7 @@ Each has an end check. "Done" means the offline tests pass on x86-64 and arm64, 
 - **Milestone 0, scaffolding. Done 21 November 2026** (tag ready; see the [record](milestone-0-validation.md)). The spec's bypass question settled. `tools/vendor.sh`, Makefile, both descriptors, both `.ttl` files with the full port lists, `ports.hpp`, state stubs, `ttl_check`, `scaffold`, `allocation`. Four VCAs at the Level controls. **Done when** `make`, `make install DESTDIR=...`, `lv2info` and `lv2lint` are clean, only `lv2_descriptor` is exported, and both plugins load in jalv and in Ingen under WSL. Tag `v0.0.1`.
 - **Milestone 1, keyframes. Done offline 21 November 2026; its Pi check done with milestone 2's; Carla is to do** (see the [record](milestone-1-validation.md)). Editing, easing, response, Frame CV, trigger, bypass, state; `editing`, `easing`, `vca`, `trigger`, `state`, `slicing`, `bypass`, `instances`, `rt_timing`. Save and reload through jalv, Carla and Ingen. The spec's silence and default questions settled. Pi xrun check. Tag `v0.1.0`; Peepo adds its overlay entry and pinned build (generic page).
 - **Milestone 2, sequencer, LFO, telemetry, first page. Done 21-22 November 2026: offline, in jalv and Ingen, on the Pi (0 xruns in 30 minutes; keyframes back after a reboot), and the page built from the approved mockup** (see the [record](milestone-2-validation.md)). `sequencer`, `lfo`, `telemetry`; the keyframe telemetry decided and appended (`t_keyframes`, 4.7). Peepo's Reel page, first version, from a mockup approved by the user before it is built (`docs/images/mockup-reel-*.png`). Tag `v0.2.0`.
-- **Milestone 3, the page.** Touch editing; moving keyframes if the user wants it (a `commands` input, appended); stomp bindings; listening on the Pi. `v0.2.x` or `v0.3.0`.
+- **Milestone 3, the page. Built 22 November 2026: offline, in jalv and Ingen, and Peepo's page and stomps in Peepo's tests; listening on the Pi is to do** (see the [record](milestone-3-validation.md)). Moving keyframes, as the user chose: `commands` appended (4.8). Touch editing on the page: a lane dragged up or down at the editing target sets its level; a keyframe's tag dragged moves it. Stomps: Next keyframe and Previous keyframe, Peepo actions that set Frame from the list. Listening on the Pi. `v0.3.0`.
 
 ## 9. Peepo-side work
 
@@ -294,7 +310,8 @@ When a milestone is done, this plan gets an "Updated" line under its header nami
 | Item | Why it matters |
 | --- | --- |
 | State and editing on different threads | The handover must be correct; the `state` test under TSan, and Ingen saves under load |
-| Editing by touch | Accidental edits when Frame sits on a keyframe and a Level is moved; the page must show the active keyframe |
+| Editing by touch | Accidental edits when Frame sits on a keyframe and a Level is moved; the page shows the active keyframe, and a lane edits a level only on the target's mark and only when the finger moves up or down |
+| Commands replayed by Ingen | Ingen saves the last `commands` value with the patch and sets it again on load; moves are ignored in the load second and the page ends each drag with 0 (4.8) |
 | Level controls versus keyframe values | Plugins can't move their own inputs; the generic page shows stale Level values over keyframes. The Reel page is the real editor |
 | Audio-only VCAs | Peepo won't cable CV into them; CV users get the Level outputs only |
 | Telemetry size | Settled in milestone 2: one string on `t_keyframes`, checked through Ingen; Peepo's adapter must watch it (`ingen:activity`, not `ingen:value`) |

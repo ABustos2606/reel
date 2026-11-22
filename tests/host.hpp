@@ -109,6 +109,11 @@ public:
     };
     std::vector<List> lists;
     bool atom_per_slice = false;
+    // commands: values sent before the next period. Ingen writes them into
+    // one sequence per period (times from the period's start) and hands it to
+    // every slice; jalv, with `atom_per_slice`, prepares the input before
+    // every run(), so later slices of a period see an empty sequence.
+    std::vector<int32_t> commands;
     bool record_lists = true; // off where the test counts allocations
     static constexpr uint32_t kAtomBytes = 4096; // rsz:minimumSize
 
@@ -120,7 +125,9 @@ private:
     std::array<float, kMaxPorts> controls_{};
     std::array<std::vector<float>, kMaxPorts> buffers_;
     std::vector<uint64_t> atom_; // 8-byte aligned
-    LV2_URID chunk_ = 0, sequence_ = 0, string_ = 0;
+    std::vector<uint64_t> commands_atom_;
+    LV2_URID chunk_ = 0, sequence_ = 0, string_ = 0, int_ = 0;
+    void prepare_commands(bool with_events);
     void prepare_atom();
     void read_atom();
     uint32_t rng_ = 0x6A09E667;

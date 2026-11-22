@@ -74,6 +74,7 @@ Reel* Reel::create(double rate, const LV2_Feature* const* features) noexcept
     auto* reel = new (std::nothrow) Reel(rate, StateKeys::map(map));
     if (reel) {
         reel->list_.map(map);
+        reel->commands_.map(map);
         reel->activate();
     }
     return reel;
@@ -94,6 +95,7 @@ Reel::Reel(double rate, const StateKeys& keys) noexcept
 void Reel::connect(uint32_t index, void* data) noexcept
 {
     if (index == reel::index(Port::t_keyframes)) { list_.connect(data); }
+    else if (index == reel::index(Port::commands)) { commands_.connect(data); }
     else if (index < kPortCount) { ports_[index] = static_cast<float*>(data); }
 }
 
@@ -119,6 +121,7 @@ void Reel::activate() noexcept
     editor_.reset();
     trigger_.reset(trigger_frames_);
     list_.reset(rate_);
+    commands_.reset();
     step_ = 0;
     step_armed_ = false;
     inputs_ = EditInputs{};
@@ -230,7 +233,14 @@ void Reel::evaluate(uint32_t frame) noexcept
     }
     const EditInputs in = inputs_;
     inputs_.add = inputs_.remove = inputs_.clear = false;
-    if (editor_.apply(keyframer_, in)) { publish(); }
+    // Moves from the page first: it numbered the keyframes before this grid
+    // frame's presses (plan, 4.8).
+    bool moved = false;
+    for (uint32_t k = 0; k < commands_.count(); ++k) {
+        moved |= editor_.move(keyframer_, commands_[k].keyframe, commands_[k].position, in.frame);
+    }
+    commands_.clear();
+    if (editor_.apply(keyframer_, in) || moved) { publish(); }
 
     // 2. Frame: the smoothed control plus Frame CV times its amount, clamped,
     // in the keyframer's units (frames.cc); in Sequencer mode, the step's
@@ -273,6 +283,7 @@ void Reel::evaluate(uint32_t frame) noexcept
 void Reel::run(uint32_t frames) noexcept
 {
     read_controls();
+    commands_.read();
     const float frame_target = control(Port::frame, 0.0f, 0.0f, 1.0f);
     const float output_target = std::pow(10.0f, control(Port::output, 0.0f, -24.0f, 12.0f) / 20.0f);
     const bool enabled = control(Port::enabled, 1.0f, 0.0f, 1.0f) > 0.5f;

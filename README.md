@@ -3,16 +3,20 @@
 An LV2 keyframe mixer and four-output LFO, written for Peepo and other LV2
 hosts. MIT licensed, Copyright (c) 2026 Alejandro Bustos.
 
-**Status, 22 November 2026: milestone 2 done; Peepo's Reel page is built
-from the approved mockup; on the Pi, 30 minutes without an xrun.** Reel stores
-keyframes with Add, Delete and Clear all, edits them with the Level controls
-as the hardware's knobs do, morphs between them along six easing curves with
-the hardware's VCA response, fires its trigger as Frame passes them, bypasses
-to unity, and saves them with the patch. Its Sequencer mode steps through the
-keyframes on each Frame CV clock. It sends the keyframe list to Peepo's page
-on an atom output, checked through Ingen. Reel LFO's four outputs run, equal
-to the hardware's LFO code driven at its own 24 kHz, and can follow the patch
-tempo. See
+**Status, 22 November 2026: milestone 3 built; listening on the Pi is to
+do.** Reel stores keyframes with Add, Delete and Clear all, edits them with
+the Level controls as the hardware's knobs do, morphs between them along six
+easing curves with the hardware's VCA response, fires its trigger as Frame
+passes them, bypasses to unity, and saves them with the patch. Its Sequencer
+mode steps through the keyframes on each Frame CV clock. It sends the keyframe
+list to Peepo's page on an atom output, and takes moves of a keyframe from
+the page on an atom input, both checked through Ingen. On Peepo's page a
+keyframe's tag drags it along Frame, a lane dragged up or down sets the
+editing target's level, and stomps step Frame to the next or previous
+keyframe. Reel LFO's four outputs run, equal to the hardware's LFO code
+driven at its own 24 kHz, and can follow the patch tempo. On the Pi
+(milestone 2), 30 minutes without an xrun. See
+[docs/milestone-3-validation.md](docs/milestone-3-validation.md),
 [docs/milestone-2-validation.md](docs/milestone-2-validation.md) and
 [docs/milestone-1-validation.md](docs/milestone-1-validation.md).
 

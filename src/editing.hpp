@@ -39,6 +39,13 @@ public:
     // Applies one grid frame's controls; returns true when the keyframe list
     // changed (to publish it for save).
     bool apply(frames::Keyframer& keyframer, const EditInputs& in) noexcept;
+    // Moves keyframe `index` to `position` (the page's commands, plan 4.8;
+    // not on the hardware). It stays between its neighbours and at least
+    // 1/32 from them, as Add leaves keyframes, so the order never changes;
+    // a keyframe already closer to a neighbour than that (only state can
+    // give one) doesn't move. Ignored while loading, as Level changes are.
+    // Returns true when the list changed.
+    bool move(frames::Keyframer& keyframer, uint8_t index, uint16_t position, uint16_t frame) noexcept;
     // The active keyframe, the editing target, or -1.
     int16_t active() const noexcept { return active_; }
 

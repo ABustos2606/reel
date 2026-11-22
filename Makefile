@@ -74,7 +74,7 @@ $(BUILD_DIR)/test_scaffold: tests/test_scaffold.cpp tests/host.cpp tests/host.hp
 
 # The keyframe tests drive the vendored Keyframer directly too, to compare
 # the plugin with it.
-$(BUILD_DIR)/test_keyframes: tests/test_keyframes.cpp tests/host.cpp tests/host.hpp src/ports.hpp src/vca.hpp src/telemetry.hpp \
+$(BUILD_DIR)/test_keyframes: tests/test_keyframes.cpp tests/host.cpp tests/host.hpp src/ports.hpp src/vca.hpp src/telemetry.hpp src/commands.hpp \
 		$(BUILD_DIR)/obj/keyframe_state.o $(VENDOR_OBJECTS)
 	@mkdir -p "$(@D)"
 	$(CXX) $(COMPILE_FLAGS) tests/test_keyframes.cpp tests/host.cpp $(BUILD_DIR)/obj/keyframe_state.o \

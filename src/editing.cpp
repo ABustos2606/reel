@@ -26,6 +26,22 @@ void Editor::sync_with_pots(frames::Keyframer& keyframer, const EditInputs& in) 
     }
 }
 
+bool Editor::move(frames::Keyframer& keyframer, uint8_t index, uint16_t position, uint16_t frame) noexcept
+{
+    const uint16_t count = keyframer.num_keyframes();
+    if (loading_ || index >= count) { return false; }
+    const int32_t lo = index ? keyframer.keyframe(index - 1).timestamp + kTolerance : 0;
+    const int32_t hi = index + 1 < count ? keyframer.keyframe(index + 1).timestamp - kTolerance : 65535;
+    if (lo > hi) { return false; }
+    const int32_t to = position < lo ? lo : position > hi ? hi : position;
+    frames::Keyframe* keyframe = keyframer.mutable_keyframe(index);
+    if (keyframe->timestamp == to) { return false; }
+    keyframe->timestamp = static_cast<uint16_t>(to);
+    // The Frame control may now be on another keyframe, or none.
+    find_nearest(keyframer, frame);
+    return true;
+}
+
 bool Editor::apply(frames::Keyframer& keyframer, const EditInputs& in) noexcept
 {
     bool changed = false;

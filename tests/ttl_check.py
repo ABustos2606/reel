@@ -31,11 +31,12 @@ def four(*names):
 # and new ports are appended.
 PLUGINS = {
     REEL: {
-        "enum": "Port", "file": "reel.ttl", "name": "Reel", "count": 41, "hosts": "reel-defaults",
+        "enum": "Port", "file": "reel.ttl", "name": "Reel", "count": 42, "hosts": "reel-defaults",
         "class": LV2.MixerPlugin, "state": True,
         "permanent": four("in") + four("out") + ["mix", "frame", "frame_cv_amount"] + four("ch")
         + ["add", "delete", "clear_all"] + four("easing") + four("response") + ["mode", "output", "frame_cv"]
-        + four("level") + ["trigger", "enabled", "t_frame", "t_count", "t_active", "t_nearest", "t_step", "t_keyframes"],
+        + four("level") + ["trigger", "enabled", "t_frame", "t_count", "t_active", "t_nearest", "t_step", "t_keyframes",
+                                                 "commands"],
     },
     LFO: {
         "enum": "LfoPort", "file": "reel_lfo.ttl", "name": "Reel LFO", "count": 13, "hosts": "lfo-defaults",
@@ -63,7 +64,7 @@ def declared_ports(enum):
     header = (ROOT / "src/ports.hpp").read_text(encoding="utf-8")
     body = re.search(rf"enum class {enum} : uint32_t \{{(.*?)\}};", header, re.S)
     require(body is not None, f"missing {enum} enum")
-    declared = re.findall(r"(\w+)\s*=\s*(\d+),\s*//\s*(audio_in|audio_out|control_in|control_out|cv_in|cv_out|atom_out)", body[1])
+    declared = re.findall(r"(\w+)\s*=\s*(\d+),\s*//\s*(audio_in|audio_out|control_in|control_out|cv_in|cv_out|atom_in|atom_out)", body[1])
     # C++ names that are keywords carry a trailing underscore (delete_).
     return {int(index): (symbol.rstrip("_"), kind) for symbol, index, kind in declared}, body[1], len(declared)
 
@@ -146,6 +147,11 @@ def check_plugin(bundle, uri, spec):
             require(graph.value(port, ATOM.bufferType) == ATOM.Sequence and
                     set(graph.objects(port, ATOM.supports)) == {ATOM.String} and
                     int(graph.value(port, RSZ.minimumSize)) >= 4096, f"{symbol}: string sequence, 4096 bytes")
+        if kind == "atom_in":
+            # Edits from the page (src/commands.hpp): integers in a sequence,
+            # as Ingen makes them from a typed xsd:int.
+            require(graph.value(port, ATOM.bufferType) == ATOM.Sequence and
+                    set(graph.objects(port, ATOM.supports)) == {ATOM.Int}, f"{symbol}: integer sequence")
         if symbol.startswith("t_") and kind == "control_out" and symbol != "t_frame":
             require(LV2.integer in props, f"{symbol}: integer telemetry")
         if kind == "cv_in":

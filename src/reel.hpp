@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Alejandro Bustos
 #pragma once
 
+#include "commands.hpp"
 #include "editing.hpp"
 #include "keyframe_state.hpp"
 #include "ports.hpp"
@@ -62,6 +63,7 @@ private:
     Editor editor_;
     Trigger trigger_;
     ListTelemetry list_;
+    Commands commands_;
 
     double rate_;
     float frame_smoothing_;

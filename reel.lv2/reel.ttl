@@ -19,7 +19,7 @@
     doap:homepage <https://github.com/ABustos2606/reel> ;
     doap:description "Made from the open-source code of Frames, a eurorack module by Emilie Gillet (MIT license)." ;
     rdfs:comment "Keyframe mixer for four channels. Add stores the four Level settings at the current Frame as a keyframe; moving Frame, by hand or by Frame CV, morphs the levels between keyframes along each channel's easing curve. The levels set four VCAs and a mix, and come out as CV. In Sequencer mode each Frame CV pulse steps to the next keyframe. Keyframes are saved with the patch." ;
-    lv2:minorVersion 2 ;
+    lv2:minorVersion 3 ;
     lv2:microVersion 0 ;
     lv2:optionalFeature lv2:hardRTCapable, urid:map ;
     lv2:extensionData state:interface ;
@@ -402,4 +402,14 @@
         lv2:symbol "t_keyframes" ;
         lv2:name "Keyframe list" ;
         rdfs:comment "The keyframes for a display: positions, ids and levels as text, sent when they change."
+    ],
+    [
+        a lv2:InputPort, atom:AtomPort ;
+        atom:bufferType atom:Sequence ;
+        atom:supports atom:Int ;
+        rsz:minimumSize 4096 ;
+        lv2:index 41 ;
+        lv2:symbol "commands" ;
+        lv2:name "Commands" ;
+        rdfs:comment "Edits from a display, as integers: move a keyframe along Frame."
     ] .

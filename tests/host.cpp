@@ -60,6 +60,9 @@ Instance::Instance(const LV2_Descriptor* d, double sample_rate, uint32_t size, b
     chunk_ = urids.map(LV2_ATOM__Chunk);
     sequence_ = urids.map(LV2_ATOM__Sequence);
     string_ = urids.map(LV2_ATOM__String);
+    int_ = urids.map(LV2_ATOM__Int);
+    commands_atom_.assign(kAtomBytes / sizeof(uint64_t), 0);
+    prepare_commands(false);
     // The Turtle defaults that are not 0, one assignment per line: ttl_check
     // reads them.
     if (lfo) {
@@ -115,6 +118,10 @@ void Instance::connect(uint32_t offset)
             descriptor->connect_port(handle, p, atom_.data());
             continue;
         }
+        if (!lfo && p == reel::index(Port::commands)) {
+            descriptor->connect_port(handle, p, commands_atom_.data());
+            continue;
+        }
         descriptor->connect_port(handle, p, is_signal(p) ? buffers_[p].data() + offset : &controls_[p]);
     }
 }
@@ -123,6 +130,7 @@ void Instance::period()
 {
     for (uint32_t p = 0; p < port_count; ++p) { buffers_[p][block] = kGuard; }
     prepare_atom();
+    prepare_commands(true);
     uint32_t offset = 0;
     double duration = 0;
     while (offset < block) {
@@ -132,6 +140,7 @@ void Instance::period()
         if (atom_per_slice && offset) {
             read_atom();
             prepare_atom();
+            prepare_commands(false);
         }
         const auto start = std::chrono::steady_clock::now();
         descriptor->run(handle, count);
@@ -152,6 +161,31 @@ void Instance::prepare_atom()
     auto* atom = reinterpret_cast<LV2_Atom*>(atom_.data());
     atom->type = chunk_;
     atom->size = kAtomBytes - sizeof(LV2_Atom);
+}
+
+// The commands input: the values sent since the last period, one event each
+// at its index's frame (or an empty sequence).
+void Instance::prepare_commands(bool with_events)
+{
+    auto* seq = reinterpret_cast<LV2_Atom_Sequence*>(commands_atom_.data());
+    seq->atom.type = sequence_;
+    seq->atom.size = sizeof(LV2_Atom_Sequence_Body);
+    seq->body.unit = 0;
+    seq->body.pad = 0;
+    if (!with_events) { return; }
+    uint32_t n = 0;
+    for (int32_t value : commands) {
+        const uint32_t event = sizeof(LV2_Atom_Event) + lv2_atom_pad_size(sizeof(int32_t));
+        require(sizeof(LV2_Atom) + seq->atom.size + event <= kAtomBytes, "commands: room");
+        auto* bytes = reinterpret_cast<uint8_t*>(commands_atom_.data());
+        auto* ev = reinterpret_cast<LV2_Atom_Event*>(bytes + sizeof(LV2_Atom) + seq->atom.size);
+        ev->time.frames = std::min<uint32_t>(n++, block - 1);
+        ev->body.size = sizeof(int32_t);
+        ev->body.type = int_;
+        std::memcpy(ev + 1, &value, sizeof(value));
+        seq->atom.size += event;
+    }
+    commands.clear();
 }
 
 // The strings in the sequence Reel wrote (nothing if it wrote none).

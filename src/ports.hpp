@@ -54,7 +54,8 @@ enum class Port : uint32_t {
     t_nearest = 38,       // control_out
     t_step = 39,          // control_out
     t_keyframes = 40,     // atom_out
-    count = 41
+    commands = 41,        // atom_in
+    count = 42
 };
 
 // Reel LFO.

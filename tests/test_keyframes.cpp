@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Alejandro Bustos
 //
-// Milestones 1 and 2 (implementation plan, 6.1): editing, easing, vca,
-// trigger, sequencer, telemetry, state, slicing, bypass, instances,
+// Milestones 1 to 3 (implementation plan, 6.1): editing, easing, vca,
+// trigger, sequencer, telemetry, state, commands, slicing, bypass, instances,
 // allocation and rt_timing
 // (--timing). The plugin is compared with the vendored Keyframer driven
 // directly.
 #include "host.hpp"
 
+#include "../src/commands.hpp"
 #include "../src/keyframe_state.hpp"
 #include "../src/vca.hpp"
 
@@ -914,6 +915,143 @@ void test_state(const LV2_Descriptor* d)
               << state_saves << " saves while editing, each a whole list\n";
 }
 
+// --- commands --------------------------------------------------------------
+
+uint16_t position_of(Instance& in, uint32_t k) { return saved_list(in).keyframes[k].timestamp; }
+
+void test_commands(const LV2_Descriptor* d)
+{
+    using reel::encode_move;
+    constexpr uint16_t kTolerance = 2048;
+    for (bool per_slice : {false, true}) {
+        Instance in(d, kRate);
+        in.atom_per_slice = per_slice;
+        build(in); // 0.1 (id 0), 0.5 (id 3), 0.8 (id 2)
+        const KeyframeList before = saved_list(in);
+        require(before.count == 3, "three keyframes");
+
+        // A move keeps the keyframe's id and levels, and goes to the page.
+        in.lists.clear();
+        in.commands.push_back(encode_move(1, code(0.6f)));
+        in.render(in.block);
+        const uint64_t sent = in.frame;
+        in.render(static_cast<uint64_t>(0.1 * kRate));
+        KeyframeList after = saved_list(in);
+        KeyframeList expected = before;
+        expected.keyframes[1].timestamp = code(0.6f);
+        require(same(after, expected), "keyframe 2 moved to 0.6, id and levels kept");
+        const auto fresh = std::find_if(in.lists.begin(), in.lists.end(),
+                                        [&](const auto& l) { return same(decode(l.text), expected); });
+        require(fresh != in.lists.end() && fresh->frame <= sent + 0.04 * kRate, "the page has it within 40 ms");
+
+        // Never past a neighbour, nor nearer than 1/32 to it; the ends are 0 and 1.
+        in.commands = {encode_move(1, code(0.79f))};
+        in.render(in.block);
+        require(position_of(in, 1) == code(0.8f) - kTolerance, "stops 1/32 before the next keyframe");
+        in.commands = {encode_move(1, 0)};
+        in.render(in.block);
+        require(position_of(in, 1) == code(0.1f) + kTolerance, "stops 1/32 after the previous keyframe");
+        in.commands = {encode_move(0, 0), encode_move(2, 65535)};
+        in.render(in.block);
+        require(position_of(in, 0) == 0 && position_of(in, 2) == 65535, "the ends");
+
+        // Malformed commands, other ops and keyframes that don't exist: nothing.
+        const KeyframeList kept = saved_list(in);
+        in.commands = {0, -1, encode_move(3, 100), encode_move(63, 100), (2 << 24) | (1 << 16) | 30000,
+                       (1 << 24) | (64 << 16) | 30000};
+        in.render(4 * in.block);
+        require(same(saved_list(in), kept), "nothing else moves anything");
+
+        // The levels follow: as a list built at those positions.
+        in.commands = {encode_move(1, code(0.4f))};
+        in.render(in.block);
+        Instance twin(d, kRate);
+        add_keyframe(twin, 0.0f, {0.0f, 1.0f, 0.5f, 0.25f});
+        add_keyframe(twin, 0.4f, {0.9f, 0.1f, 0.2f, 0.8f});
+        add_keyframe(twin, 1.0f, {0.4f, 0.7f, 1.0f, 0.0f});
+        settings_like(twin);
+        const auto positions = sweep(1000);
+        require(levels_at(in, positions) == levels_at(twin, positions), "levels as if added there");
+    }
+
+    // The editing target follows: Frame on keyframe 2, moved away, then back.
+    {
+        Instance in(d, kRate);
+        build(in);
+        in.control(Port::frame) = 0.5f;
+        in.render(2 * in.block);
+        require(telemetry(in, Port::t_active) == 1, "Frame on keyframe 2");
+        in.commands = {encode_move(1, code(0.65f))};
+        in.render(in.block);
+        require(telemetry(in, Port::t_active) == -1, "moved away: no editing target");
+        in.control(Port::ch_1) = 0.33f;
+        in.render(2 * in.block);
+        require(saved_list(in).keyframes[1].values[0] == code(0.9f), "a Level change then edits nothing stored");
+        in.control(Port::frame) = 0.65f;
+        in.render(2 * in.block);
+        require(telemetry(in, Port::t_active) == 1, "Frame on it again");
+        in.control(Port::ch_1) = 0.25f;
+        in.render(2 * in.block);
+        require(saved_list(in).keyframes[1].values[0] == code(0.25f), "and a Level change edits it");
+        // A keyframe moved onto Frame becomes the target.
+        in.commands = {encode_move(2, code(0.67f))};
+        in.render(in.block);
+        require(position_of(in, 2) == code(0.65f) + kTolerance && telemetry(in, Port::t_active) == 1,
+                "the nearer one stays the target");
+        in.commands = {encode_move(1, code(0.6f))};
+        in.render(in.block);
+        require(telemetry(in, Port::t_active) == -1, "keyframe 2 moved off Frame");
+        in.commands = {encode_move(2, code(0.65f))};
+        in.render(in.block);
+        require(position_of(in, 2) == code(0.65f) && telemetry(in, Port::t_active) == 2, "keyframe 3 onto Frame");
+
+        // Sequencer mode: the step is kept, and Frame is the step's new position.
+        in.control(Port::mode) = 1;
+        hold(in, 0.0f);
+        hold(in, 1.0f); // step 1
+        in.commands = {encode_move(1, code(0.55f))};
+        in.render(in.block);
+        hold(in, 0.0f, 0.01);
+        require(telemetry(in, Port::t_step) == 1 && code(in.control(Port::t_frame)) == code(0.55f),
+                "the sequencer's step follows its keyframe");
+    }
+
+    // A patch loading: Ingen saves the last value sent to commands and sets it
+    // again after it restores the keyframes. For a second it is ignored.
+    {
+        Instance a(d, kRate);
+        build(a);
+        test::State state;
+        a.save(state);
+        Instance b(d, kRate);
+        b.render(b.block);
+        b.restore(state);
+        b.render(b.block);
+        b.commands = {encode_move(1, code(0.3f))};
+        b.render(static_cast<uint64_t>(0.5 * kRate));
+        require(same(saved_list(b), saved_list(a)), "a move set as the patch loads moves nothing");
+        b.render(static_cast<uint64_t>(0.6 * kRate));
+        b.commands = {encode_move(1, code(0.3f))};
+        b.render(b.block);
+        require(position_of(b, 1) == code(0.3f), "after a second a move moves");
+    }
+
+    // Without urid:map commands are not read.
+    {
+        Instance bare(d, kRate, 128, false);
+        build(bare);
+        bare.control(Port::frame) = 0.5f;
+        bare.render(2 * bare.block);
+        bare.commands = {encode_move(1, code(0.6f))};
+        bare.render(bare.block);
+        require(telemetry(bare, Port::t_active) == 1, "no urid:map, no commands");
+    }
+    std::cout << "PASS commands: a move keeps the keyframe's id and levels and reaches the page within 40 ms; it "
+                 "stops 1/32 from its neighbours and at 0 and 1; malformed commands, other ops and missing keyframes "
+                 "do nothing; levels as if added there; the editing target and the sequencer's step follow; ignored "
+                 "for a second after a restore; buffers per period (Ingen) and per run() (jalv)\n";
+}
+
 // --- slicing ---------------------------------------------------------------
 
 // Controls change only where a period starts for both 128- and 37-frame
@@ -938,6 +1076,8 @@ void performance(Instance& in, uint32_t i, uint64_t frame)
         in.control(Port::output) = n % 3 ? -12.0f : 3.0f;
         in.control(Port::enabled) = n % 13 == 12 ? 0.0f : 1.0f;
         in.control(Port::mode) = n % 11 >= 8 ? 1.0f : 0.0f;
+        // A keyframe dragged by the page, now and then.
+        if (n % 4 == 2) { in.commands.push_back(reel::encode_move(n % 5, static_cast<uint32_t>((n * 7919) % 65536))); }
     }
 }
 
@@ -957,8 +1097,8 @@ void test_slicing(const LV2_Descriptor* d)
         require(same(saved_list(whole), saved_list(sliced)) && same(saved_list(whole), saved_list(small)),
                 "the same keyframes");
     }
-    std::cout << "PASS slicing: whole periods, random slices and 37-frame periods agree with edits, presses, easing, "
-                 "response, bypass and Frame CV moving\n";
+    std::cout << "PASS slicing: whole periods, random slices and 37-frame periods agree with edits, presses, moves, "
+                 "easing, response, bypass and Frame CV moving\n";
 }
 
 // --- bypass ----------------------------------------------------------------
@@ -1066,6 +1206,7 @@ void test_allocation(const LV2_Descriptor* d)
     // save and restore called from another thread meanwhile.
     Instance instance(d, kRate, 128);
     instance.record_lists = false;
+    instance.commands.reserve(64); // the host's own queue, not Reel's
     build(instance);
     test::State state;
     instance.save(state);
@@ -1138,6 +1279,10 @@ void test_timing(const LV2_Descriptor* d)
             in.control(Port::enabled) = random() > 0.05f;
             in.control(Port::output) = 36 * random() - 24;
             in.control(Port::mode) = random() > 0.8f ? 1.0f : 0.0f;
+            if (random() > 0.5f) {
+                in.commands.push_back(reel::encode_move(static_cast<uint32_t>(8 * random()),
+                                                        static_cast<uint32_t>(65535 * random())));
+            }
         }
     });
     done = true;
@@ -1170,6 +1315,7 @@ int main(int argc, char** argv)
         test_sequencer(library.descriptor);
         test_telemetry(library.descriptor);
         test_state(library.descriptor);
+        test_commands(library.descriptor);
         test_slicing(library.descriptor);
         test_bypass(library.descriptor);
         test_instances(library.descriptor);

@@ -15,7 +15,7 @@
     doap:homepage <https://github.com/ABustos2606/reel> ;
     doap:description "Made from the open-source code of Frames, a eurorack module by Emilie Gillet (MIT license)." ;
     rdfs:comment "Four related LFOs. Rate sets the speed, Shape morphs the waveform, Shape spread gives each next output a different shape, Spread offsets their phases (above the centre) or speeds up each next one (below), and Coupling lets each output bend its neighbour's phase. With Tempo sync on, each cycle lasts the Note at the BPM instead of following Rate. Outputs are CV from 0 to 1." ;
-    lv2:minorVersion 2 ;
+    lv2:minorVersion 3 ;
     lv2:microVersion 0 ;
     lv2:optionalFeature lv2:hardRTCapable ;
     lv2:port

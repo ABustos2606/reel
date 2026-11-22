@@ -326,10 +326,33 @@ def main():
             require([(p, levels) for p, _, levels in listed] ==
                     [(code(p), tuple(code(x) for x in levels)) for p, levels in KEYFRAMES],
                     f"Ingen: the list a watching client gets: {listed}")
-            protocol.request("Set", "patch:subject <ingen:/main/reel/t_keyframes> ; "
-                             "patch:property ingen:broadcast ; patch:value false")
             print(f"PASS Ingen: a client watching t_keyframes gets the list ({len(match[1])} characters, "
                   f"{len(listed)} keyframes, positions and levels right); {threads} threads", flush=True)
+
+            # The page moves a keyframe as Peepo does (src/commands.hpp): a
+            # typed xsd:int on the commands input, then 0 when the drag ends,
+            # so the value Ingen saves with the patch moves nothing on load.
+            def command(value):
+                protocol.request("Set", "patch:subject <ingen:/main/reel/commands> ; "
+                                 f'patch:property ingen:value ; patch:value "{value}"^^xsd:int')
+
+            def move(keyframe, position):
+                command(1 << 24 | keyframe << 16 | code(position))
+
+            move(1, 0.6)
+            match = protocol.notifications(rf'reel/t_keyframes>.*?ingen:activity.*?"(1:[0-9a-f]*{code(0.6):04x}[0-9a-f]*)"')
+            moved = decode_list(match[1])
+            require([p for p, _, _ in moved] == [code(0.2), code(0.6)] and
+                    [levels for _, _, levels in moved] == [levels for _, _, levels in listed],
+                    f"Ingen: keyframe 2 moved to 0.6, levels kept: {moved}")
+            move(1, 0.8)
+            command(0)
+            match = protocol.notifications(rf'reel/t_keyframes>.*?ingen:activity.*?"(1:[0-9a-f]*{code(0.8):04x}[0-9a-f]*)"')
+            require(decode_list(match[1]) == listed, "Ingen: moved back to 0.8, the list as before")
+            protocol.request("Set", "patch:subject <ingen:/main/reel/t_keyframes> ; "
+                             "patch:property ingen:broadcast ; patch:value false")
+            print(f"PASS Ingen: a move set on commands as xsd:int moves keyframe 2 to 0.6 and back, levels and "
+                  f"ids kept; {threads} threads", flush=True)
 
             # Level 2 at 0.6 and 3 at 0 with Frame between the keyframes edit
             # none; then Frame moves onto the second keyframe (Level 2 0.25)
@@ -358,6 +381,11 @@ def main():
                     "the keyframes are saved with the patch")
             require("reel#keyframes" not in (save_path / "reel2" / "state.ttl").read_text(),
                     "the other Reel saves none")
+            # Ingen saves the last value set on commands and sets it again on
+            # load: the 0 sent after the drag.
+            main = (save_path / "main.ttl").read_text()
+            commands = re.search(r"<reel/commands>\s*ingen:value (-?\d+)", main)
+            require(commands and commands[1] == "0", f"commands saved as 0: {commands and commands[0]}")
             require(engine.poll() is None, "Ingen exited")
             print(f"PASS Ingen: controls and keyframes saved with the patch, which reloads; {threads} threads",
                   flush=True)

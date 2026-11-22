@@ -2,7 +2,7 @@
 
 Reel is a keyframe mixer for Peepo, a pedal built on a Raspberry Pi 5 running the Ingen modular host. It stores up to 64 snapshots (keyframes) of four channel levels along a Frame axis; moving Frame, by hand or by CV, morphs the levels between them, with an easing curve per channel. The levels drive four VCAs and a mix, and come out as CV. Reel LFO, a second plugin in the bundle, is a four-output LFO with related shapes, phases and rates. It is an LV2 plugin made from the open-source code of Frames, a eurorack module by Emilie Gillet. Peepo shows Reel on a page of its own ([peepo-page.md](peepo-page.md)). It must also work as a normal LV2 plugin in Carla or Ardour, without that page.
 
-**Written:** 20 October 2026, from Peepo's `docs/38-eurorack-ports-roadmap.md` and a reading of Frames' source at `pichenettes/eurorack` commit `f4cfa7697095a28d292bff758beb51deb49b5a86` (12 October 2026). **Revised 20 November 2026** after reading every file Reel will use (`keyframer.*`, `poly_lfo.*`, `ui.*`, `frames.cc`, `drivers/dac.h`, `drivers/adc.h`, `drivers/system.cc`, `resources.h`, `resources/lookup_tables.py`) and Peepo's and Ingen's cable rules: how editing finds its keyframe, the step curve, the response curve and its floor, the trigger, the sequencer's clock, the LFO's controls and ranges, what flash storage does under `-DTEST`, and the audio-or-CV question were corrected or settled. **Status:** spec; milestone 0 built (21 November 2026); milestone 1 built and checked offline and in jalv and Ingen (21 November 2026); milestone 2 (the sequencer, Reel LFO, the keyframe telemetry, Peepo's page) built and checked offline, in jalv and Ingen and on the Pi (21-22 November 2026). [implementation-plan.md](implementation-plan.md) says how to build it.
+**Written:** 20 October 2026, from Peepo's `docs/38-eurorack-ports-roadmap.md` and a reading of Frames' source at `pichenettes/eurorack` commit `f4cfa7697095a28d292bff758beb51deb49b5a86` (12 October 2026). **Revised 20 November 2026** after reading every file Reel will use (`keyframer.*`, `poly_lfo.*`, `ui.*`, `frames.cc`, `drivers/dac.h`, `drivers/adc.h`, `drivers/system.cc`, `resources.h`, `resources/lookup_tables.py`) and Peepo's and Ingen's cable rules: how editing finds its keyframe, the step curve, the response curve and its floor, the trigger, the sequencer's clock, the LFO's controls and ranges, what flash storage does under `-DTEST`, and the audio-or-CV question were corrected or settled. **Status:** spec; milestone 0 built (21 November 2026); milestone 1 built and checked offline and in jalv and Ingen (21 November 2026); milestone 2 (the sequencer, Reel LFO, the keyframe telemetry, Peepo's page) built and checked offline, in jalv and Ingen and on the Pi (21-22 November 2026); milestone 3 (moving keyframes, touch editing, stomps) built and checked offline, in jalv and Ingen and in Peepo's tests (22 November 2026), listening on the Pi to do. [implementation-plan.md](implementation-plan.md) says how to build it.
 
 ## Why Frames
 
@@ -143,7 +143,7 @@ Symbols are fixed in milestone 0 and then never change; indices are in the plan.
 | Mode | Keyframes, Sequencer | five Adds | |
 | Output | dB, -24 to 12 | | On the mix only |
 
-Audio: In 1-4, Out 1-4 (input times gain), Mix. CV input: Frame CV. CV outputs: Level out 1-4 (the gain, 0 to 1), Trigger. Telemetry for the page: [peepo-page.md](peepo-page.md). The keyframe list goes to the page on an atom output, `t_keyframes`, as one string (settled in milestone 2; plan, 4.7).
+Audio: In 1-4, Out 1-4 (input times gain), Mix. CV input: Frame CV. CV outputs: Level out 1-4 (the gain, 0 to 1), Trigger. Telemetry for the page: [peepo-page.md](peepo-page.md). The keyframe list goes to the page on an atom output, `t_keyframes`, as one string (settled in milestone 2; plan, 4.7). The page's edits come in on an atom input, `commands`: moving a keyframe (milestone 3; plan, 4.8).
 
 ### Reel LFO
 
@@ -172,6 +172,7 @@ Every rule in "Editing" above is kept, with controls for knobs and buttons:
 
 - A **change** of a Level control is a knob move (it must differ from the last value Reel saw by at least 1/1024); a Level control that doesn't change does nothing. The values a patch loads with are not edits. Ingen sets them one by one after it has restored the keyframes and started the block, so for a second after the keyframes are restored a Level change is taken as a loaded value (milestone 1; plan, 4.2).
 - **Add**, **Delete**, **Clear all** act on their rising edge.
+- **Moving a keyframe** (Reel's own; the hardware can't): the page sends "move keyframe *k* to *p*" on the `commands` input. The keyframe keeps its levels and id, and stays between its neighbours and at least 1/32 from them, as Add leaves keyframes, so their order never changes.
 - The active keyframe follows the **Frame control** only, as the hardware's knob; Frame CV never selects one for editing.
 - Because Level controls can't follow the active keyframe's values (plugins can't write their inputs), the page shows the keyframe's values from telemetry and writes the Level control when the user moves it.
 
@@ -221,16 +222,20 @@ Settled in milestone 2 (21 November 2026):
 - **A BPM for Reel LFO** (asked; the user chose "like other modules do"): `bpm`, `sync` and `note` appended (indices 10-12); Peepo sets `bpm` from the patch tempo.
 - **The page:** the mockup approved as drawn; encoders as on every module page (E1 picks a bar, E2 turns it; Frame is a bar).
 
+Settled with the user in milestone 3 (22 November 2026):
+
+- **Moving a keyframe:** yes, as recommended: a `commands` atom input (index 41, appended), "move keyframe *k* to *p*" as one integer; the page drags a keyframe by its tag. Ingen saves the last value set on the port and sets it again when a patch loads, so moves are ignored in the second after the keyframes are restored, and the page ends each drag with 0, which does nothing (plan, 4.8).
+- **Touch editing:** dragging a lane up or down on the editing target's mark sets that channel's level, starting from the keyframe's own; sideways from there still scrubs Frame.
+- **Next keyframe on a stomp:** a Peepo stomp action (Next keyframe, Previous keyframe) that sets Frame onto the keyframe after (or before) it, wrapping; no plugin change. Add and Delete on stomps are their momentary controls.
+- **Knobs editing a keyframe:** the hardware's rule kept; the page outlines the editing target and names it.
+
 ## Open questions
 
-| Question | Why it matters | Recommendation | Settle by |
-| --- | --- | --- | --- |
-| Knobs editing a keyframe | Moving Frame onto a keyframe and then touching a level edits it; that can surprise | Keep the rule; the page highlights the active keyframe | Milestone 2, with the page |
-| Moving a keyframe | The hardware can't; the page could | A `commands` atom input, as Loo-pi's | Milestone 3 |
+None.
 
 ## Milestones
 
 - [x] Milestone 0 (21 November 2026, [record](milestone-0-validation.md)): vendored code, Makefile, LV2 glue and both `.ttl` files with the full port lists, state stubs. Reel passes audio through four VCAs at the Level controls. Loads in jalv and in Ingen under WSL. Tag `v0.0.1`.
 - [ ] Milestone 1: keyframes: Add, Delete, Clear all, editing, easing, response, Frame CV, the trigger, LV2 state saved and restored (jalv, Carla, Ingen). Pi xrun check. Tag `v0.1.0`. *Built 21 November 2026 ([record](milestone-1-validation.md)): offline tests on x86-64 and arm64, jalv and Ingen pass; Carla is to do; the Pi check was done with milestone 2's.*
 - [x] Milestone 2: the sequencer, Reel LFO, telemetry; Peepo's Reel page, first version, from an approved mockup. Tag `v0.2.0`. *Done 21-22 November 2026 ([record](milestone-2-validation.md)): offline tests on x86-64 and arm64, jalv and Ingen pass; the page built from the approved mockup; on the Pi 0 xruns in 30 minutes and the keyframes back after a reboot.*
-- [ ] Milestone 3: the page complete (touch editing, moving keyframes if wanted), stomp bindings, listening on the Pi.
+- [ ] Milestone 3: the page complete (touch editing, moving keyframes if wanted), stomp bindings, listening on the Pi. *Built 22 November 2026 ([record](milestone-3-validation.md)): `commands` appended for moving keyframes; offline tests on x86-64 and arm64, jalv and Ingen pass; Peepo's page and stomps pass its tests on Windows. Listening on the Pi is to do.*

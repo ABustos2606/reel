@@ -1,6 +1,6 @@
 # The Reel page in Peepo
 
-**Written:** 20 October 2026. **Updated 21 November 2026 (milestone 2):** the keyframe list settled as `t_keyframes` (40), one string (below); a new mockup that follows Peepo's 21 October page rule, approved and built (next section). A pressed button is 1, then 0 80 ms later. **Updated 21 November 2026 (milestone 1):** `t_nearest` counts from 0; Level writes in the second after a patch loads are not edits. **Updated 20 November 2026:** the contract follows the plan's port list (indices, `t_active` and `t_nearest` told apart, `t_step`, the keyframe list as one atom output), and the layout is marked for re-approval. **Follows:** [design.md](design.md). **Status:** the layout below was **accepted by the user on 20 October 2026**. On 21 October Peepo's rule became that every page is built like a module page: actions as header pills (main one white and first), one scrolling list of 300 x 40 bars two per row, no bottom button rows, no new bars on the small screen. The drawing's bottom row of buttons does not follow that rule. **Before anything is built, a new mockup that keeps this layout's lanes and moves its buttons into the header goes to the user and is approved.** The look is Peepo's own (Peepo `docs/03-interface-and-controls.md`, "Visual style", and its black pill-header design).
+**Written:** 20 October 2026. **Updated 22 November 2026 (milestone 3):** moving a keyframe settled as `commands` (41), an atom input; touch editing (a lane dragged up or down at the editing target, a keyframe's tag dragged along Frame); stomps for the next and previous keyframe (below). **Updated 21 November 2026 (milestone 2):** the keyframe list settled as `t_keyframes` (40), one string (below); a new mockup that follows Peepo's 21 October page rule, approved and built (next section). A pressed button is 1, then 0 80 ms later. **Updated 21 November 2026 (milestone 1):** `t_nearest` counts from 0; Level writes in the second after a patch loads are not edits. **Updated 20 November 2026:** the contract follows the plan's port list (indices, `t_active` and `t_nearest` told apart, `t_step`, the keyframe list as one atom output), and the layout is marked for re-approval. **Follows:** [design.md](design.md). **Status:** the layout below was **accepted by the user on 20 October 2026**. On 21 October Peepo's rule became that every page is built like a module page: actions as header pills (main one white and first), one scrolling list of 300 x 40 bars two per row, no bottom button rows, no new bars on the small screen. The drawing's bottom row of buttons does not follow that rule. **Before anything is built, a new mockup that keeps this layout's lanes and moves its buttons into the header goes to the user and is approved.** The look is Peepo's own (Peepo `docs/03-interface-and-controls.md`, "Visual style", and its black pill-header design).
 
 The page is Peepo code (LVGL, `src/ui/`), not an LV2 UI: Ingen runs plugins without their interfaces, and Peepo already draws its own pages for the Tuner, the Euclidean sequencer and Loo-pi. This document is the contract between the two repositories: what the page shows, and which ports it reads and writes. It follows Loo-pi's `docs/peepo-page.md`.
 
@@ -19,6 +19,7 @@ Drawn 21 November 2026 to Peepo's rule of 21 October (header pills, the main one
 - **Header pills:** ADD (white when Add would store a keyframe, dim when Frame sits on one), DELETE (dim with no editing target), CLEAR ALL, ON (bypass, the `enabled` port) and ACTIONS, as on every module page. Each button pulses its port (below).
 - **Lanes,** under the header, always visible: the Frame axis left to right, one lane per channel with its level along Frame, drawn with each channel's easing; keyframes as vertical marks in their colour (`palette_` by id), with numbered tags; the editing target outlined in white; Frame as the green cursor with a handle, and under it the 1/32 zone in which a keyframe becomes the target. On the right, each channel's current level (`level_1`-`level_4`).
 - **Touch on the lanes:** tap moves Frame there; a tap within 1/32 of a keyframe writes its exact position, so it becomes the target; dragging scrubs.
+- **Touch editing (milestone 3):** on the editing target's mark, dragging a lane up or down sets that channel's level (`ch_n`), starting from the keyframe's level, 140 px for the whole range; moving sideways from there scrubs Frame as before (the first 6 px decide). Dragging a keyframe's numbered tag moves the keyframe along Frame (`commands`, below), stopping 1/32 from its neighbours; if it was the editing target, Frame goes with it, so it stays the target. The footer says where it went. The lanes don't scroll the page.
 - **The list,** under the lanes: FRAME and FRAME CV AMT; the editing target's heading (KEYFRAME 3 OF 5, or NO KEYFRAME AT 0.40) and LEVEL 1-4; CURVES (EASING 1-4, RESPONSE 1-4); MODE (Keyframes or Sequencer, a choice bar) and OUTPUT. A Level bar starts from the keyframe's level read from `t_keyframes`, so the first touch doesn't jump.
 - **Encoders,** as on every module page: E1 picks a bar, E2 turns it; Frame is a bar (confirmed by the user, 21 November 2026; it replaces the October layout's "E1 moves Frame").
 - **Footer:** Frame and the editing target, or the step in Sequencer mode.
@@ -60,13 +61,27 @@ Port numbers are the plan's (section 3). Symbols are permanent once a patch is s
 | Add, Delete, Clear all | Pulse `add` (15), `delete` (16), `clear_all` (17): 1, then 0 after at least one period |
 | Edit a keyframe's level | Make it active (Frame within 1/32 of it), then set `ch_n` (11-14), as on the hardware. The bar starts from the keyframe's level read from telemetry, so the first touch doesn't jump |
 | Easing, response, mode | `easing_n` (18-21), `response_n` (22-25), `mode` (26), so the patch saves them |
-| Move a keyframe | **Open**: a `commands` atom input (as Loo-pi's) carrying "move keyframe i to position p"; milestone 3, if the user wants it |
+| Move a keyframe | One `xsd:int` on `commands` (41) per step of a drag: `1 << 24 \| k << 16 \| p`, keyframe `k` counted from 0 in `t_keyframes`' order, `p` from 0 to 65535 (below); then `0` when the drag ends |
+| Step Frame to the next or previous keyframe (a stomp) | `frame` (9) set to that keyframe's position, from the list (below) |
 
 Frame CV never selects the active keyframe: only `frame` does (`ui.cc`). The page shows the effective Frame (`t_frame`) as the cursor and the knob's own value where it differs.
 
 For a second after a patch loads (after Reel takes restored keyframes), Level writes are taken as the patch's values and edit no keyframe: Ingen sets the saved port values after the block is running, and they must not edit (plan, 4.2). The page has nothing to do about it; a user can't open the page and move a level that fast.
 
 Add, Delete and Clear all act on the rising edge, read at every `run()` and kept until the next 8-frame grid step, so a pulse of one period is always seen.
+
+### Moving a keyframe, `commands` (milestone 3)
+
+An atom input (`atom:Sequence` of `atom:Int`), set as Loo-pi's: `patch:Set` of `ingen:value` on `<block>/commands` with a typed `xsd:int` literal, which Ingen turns into an `atom:Int` event in the next block.
+
+- **Value:** `op << 24 | keyframe << 16 | position`. Op 1 moves keyframe `keyframe` (0-63, in the order of `t_keyframes`) to `position` (0-65535); op 0 does nothing; other values are ignored. Reel keeps the keyframe between its neighbours and at least 1/32 (2048) from each, so the order and the numbering don't change during a drag; the page clamps the same way (`reel_move_limit`) so it knows where the keyframe went.
+- **End every drag with 0.** Ingen keeps the last value set on the port, saves it with the patch and sets it again when the patch loads. Reel ignores moves for a second after it takes restored keyframes, and a saved 0 does nothing.
+- The move reaches `t_keyframes` within 40 ms. It is an edit of the patch (the keyframes are its state), as Add is.
+
+### Stomps (milestone 3)
+
+- **Add, Delete:** their controls, assigned as momentary (Settings → Controls).
+- **Next keyframe, Previous keyframe:** Peepo actions on a Reel (`ControlAction::Reel`, saved as `reel|<block>|<plugin>|next` or `previous`). Each press sets `frame` exactly onto the keyframe after Frame (or before it), wrapping at the ends, so the Level bars edit it. Peepo keeps `t_keyframes` watched for every Reel a stomp steps through, also with the page closed (one list every half second).
 
 ### What the page reads
 
@@ -106,5 +121,5 @@ An atom output (`atom:Sequence` of `atom:String`). Watch it as the Euclidean and
 2. A Reel page in `src/ui/`, chosen by the plugin URI, as the Euclidean and Loo-pi pages are.
 3. A `watch_reel` / `reel_status` in the engine interface and the Ingen session, following `watch_euclidean`: the control outputs `t_frame`, `t_count`, `t_active`, `t_nearest`, `t_step`, `level_1`-`level_4` as `ingen:value`, and `t_keyframes` as `ingen:activity` (above); `Session::merge` must take `ingen:activity` on `t_keyframes` without treating it as a change to the graph.
 4. The overlay entry, hiding the generic page's controls that the Reel page replaces.
-5. Stomp bindings: Add, Delete, next keyframe.
+5. Stomp bindings: Add, Delete, next keyframe. Built in milestone 3: Add and Delete as momentary controls, Next and Previous keyframe as Peepo actions (above).
 6. Tests: LVGL captures at 800 x 480 of empty, one keyframe, many keyframes, sequencer mode; adapter tests for the telemetry; a live WSL check with the real plugin.
